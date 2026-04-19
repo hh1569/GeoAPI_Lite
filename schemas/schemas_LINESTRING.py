@@ -19,7 +19,7 @@ class LinestringCreate(BaseModel):
 
     @model_validator(mode="before")
     def check_geom_coords(cls, values):
-        # 1. 取出 geom（和你原来一样）
+        # 1. 取出 geom
         geom_wkt = values.get("geom")
 
         if not geom_wkt:
