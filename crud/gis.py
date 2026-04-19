@@ -12,7 +12,6 @@ async def test():
     pass
 
 async def get_id_geometry(db: AsyncSession,table,tableid,userid: int):
-    #根据id差要素
     result = await db.execute(select(table).
                         where(table.id == tableid, table.userid == userid))
     return result.scalar_one_or_none()
@@ -134,13 +133,13 @@ async def geometry_in_geometry(db: AsyncSession,table_1,table_2,userid: int,tabl
         subquery = (
             select(table_1.geom)
             .where(table_1.id == table1_id,table_1.userid == userid)
-        ).scalar_subquery()# 把 “一行数据 / 查询集” → 扒成 “一个单独的值”...这里变成纯 geom 值
+        ).scalar_subquery()
 
     else:
         subquery = (
             select(func.ST_Union(table_1.geom))
             .where(table_1.userid == userid)
-        ).scalar_subquery() # 把 “一行数据 / 查询集” → 扒成 “一个单独的值”...这里变成纯 geom 值
+        ).scalar_subquery()
    # 找出所有在这个面内的要素
     query = (
         select(table_2)

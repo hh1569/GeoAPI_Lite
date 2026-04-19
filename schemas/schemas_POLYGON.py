@@ -5,7 +5,7 @@ from fastapi import HTTPException
 from pydantic import BaseModel, Field, ConfigDict, model_validator
 from starlette import status
 
-#数据校验数值错误时，无法进入判断，只会抛异常。。。没搞懂
+#数据校验数值错误时，无法进入判断，只会抛异常
 class PolygonCreate(BaseModel):
     """创建面位入参"""
     name: str = Field(min_length=1, max_length=100, description="线位名称")
@@ -45,7 +45,7 @@ class PolygonCreate(BaseModel):
                 detail="面必须首尾相连"
             )
 
-        # 4. 遍历所有点，每个点都校验经纬度（和你原来逻辑一样）
+        # 4. 遍历所有点，每个点都校验经纬度
         for lon, lat in all_coords:
             # 经度校验
             if not (-180 <= lon <= 180):
@@ -81,7 +81,7 @@ class PolygonUpdate(BaseModel):
             return values
 
         try:
-            # 2. 解析 WKT → 支持 点、线、面（和你一样）
+            # 2. 解析 WKT → 支持 点、线、面
             geom = loads(geom_wkt)
 
             # 3. 获取所有坐标点
@@ -98,7 +98,7 @@ class PolygonUpdate(BaseModel):
                 detail="面必须首尾相连"
             )
 
-        # 4. 遍历所有点，每个点都校验经纬度（和你原来逻辑一样）
+        # 4. 遍历所有点，每个点都校验经纬度
         for lon, lat in all_coords:
             # 经度校验
             if not (-180 <= lon <= 180):

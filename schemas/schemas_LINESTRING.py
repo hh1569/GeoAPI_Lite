@@ -41,7 +41,7 @@ class LinestringCreate(BaseModel):
                 detail="geom 格式不正确，请传入合法的 WKT 格式"
             )
 
-        # 4. 遍历所有点，每个点都校验经纬度（和你原来逻辑一样）
+        # 4. 遍历所有点，每个点都校验经纬度
         for lon, lat in all_coords:
             # 经度校验
             if not (-180 <= lon <= 180):
@@ -77,7 +77,7 @@ class LinestringUpdate(BaseModel):
             return values
 
         try:
-            # 2. 解析 WKT → 支持 点、线、面（和你一样）
+            # 2. 解析 WKT → 支持 点、线、面
             geom = loads(geom_wkt)
 
             # 3. 获取所有坐标点
@@ -89,7 +89,7 @@ class LinestringUpdate(BaseModel):
                 detail="geom 格式不正确，请传入合法的 WKT 格式"
             )
 
-        # 4. 遍历所有点，每个点都校验经纬度（和你原来逻辑一样）
+        # 4. 遍历所有点，每个点都校验经纬度
         for lon, lat in all_coords:
             # 经度校验
             if not (-180 <= lon <= 180):

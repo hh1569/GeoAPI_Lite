@@ -32,7 +32,6 @@ class PointCreate(BaseModel):
                 detail="geom 不能为空"
             )
         try:
-        # 2. 把 WKT 转成几何对象 → 自动拿出 lon, lat
             geom = loads(geom_wkt)
 
             lon = geom.x  # 经度

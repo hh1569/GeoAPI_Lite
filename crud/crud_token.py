@@ -25,7 +25,7 @@ async def create_token(db: AsyncSession, user_id: int):
         db.add(user_token)
         await db.commit()
 
-    return token#函数返回最新生成token。。前端返回新token。后端必须同步更新
+    return token
 
 
 
@@ -50,15 +50,12 @@ async def authenticate_user(db: AsyncSession, account: str | int, password: str)
     # 2. 用户名不存在 → 再尝试按【ID】查
     if not user:
         try:
-            # 尝试转成 int，如果失败直接跳过
             userid = int(account)
             user = await get_user_userid(db, userid)
         except (ValueError, TypeError):
             user = None
-    # 3. 都没查到
     if not user:
         return None
-    # 4. 验证密码
     if not encryption.verify_password(password, user.password):
         return None
     return user
@@ -71,11 +68,8 @@ async def get_user_by_token(db: AsyncSession, token: str):
     result = await db.execute(stmt_token)
     db_token = result.scalar_one_or_none()
 
-    # 2. 先判断token是否存在，再判断是否过期（避免空值访问）
-    # 逻辑：token不存在 → 返回None；token存在但已过期 → 返回None
     if not db_token:
-        return None  # token不存在
-
+        return None
     # 使用UTC时间比较，避免时区问题
     if datetime.now() > db_token.expires_at:
         return None  # token已过期

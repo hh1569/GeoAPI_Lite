@@ -47,7 +47,6 @@ class BboxQuery(BaseModel):
         max_lon = values.get("max_lon")
         max_lat = values.get("max_lat")
 
-        # 手动判断 + 抛出自定义异常
         if min_lon is not None and not (-180 <= min_lon <= 180) or max_lon is not None and not (-180 <= max_lon <= 180):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,

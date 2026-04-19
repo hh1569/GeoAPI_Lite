@@ -49,10 +49,6 @@ class PointFeature(Base):
     def get_wkt(self, geom_field: str):
         """获取几何的WKT文本格式（如 POINT(120 30)）"""
         geom = getattr(self, geom_field)
-        # print(type(to_shape(geom)))  # <class 'shapely.geometry.point.Point'>
-        # print(type(to_shape(geom.wkt)))  # <class 'str'>
-        # print(type(geom))   #"<class 'geoalchemy2.elements.WKBElement'>",
-        # print(geom) #"0101000020e61000000000000000005e400000000000003e40"
         return to_shape(geom).wkt
 
     def get_lon(self, geom_field: str) -> float:

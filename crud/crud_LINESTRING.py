@@ -33,8 +33,7 @@ async def update_linestring(db: AsyncSession, linestring_id: int, update_data: d
         return None
     for key, value in update_data.items():
         if value is not None:
-            #setattr(对象, 属性名, 值) = 给对象设置属性
-            setattr(linestring, key, value)#==linestring.key = value
+            setattr(linestring, key, value)
     await db.commit()
     await db.refresh(linestring)
     return linestring
