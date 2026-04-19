@@ -21,10 +21,13 @@
 ## 快速开始
 
 1. 克隆仓库
-   git clone https://github.com/hh1569/GeoAPI_Lite.git
+   git clone
+   
+   https://github.com/hh1569/GeoAPI_Lite.git
+   
    cd GeoAPI_Lite
 
-2. 启动服务
+3. 启动服务
  python main.py
    
    
