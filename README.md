@@ -18,6 +18,9 @@
 - SQLAlchemy 2.0 + GeoAlchemy2（异步 ORM）
 - Shapely（几何对象处理）
 
+## 核心接口示例
+
+![Swagger接口文档](./预览.png)
 ## 快速开始
 
 1. 克隆仓库
