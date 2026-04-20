@@ -17,7 +17,7 @@ router_user = APIRouter(prefix="/user", tags=["user"])
 router_point = APIRouter(prefix="/api/point", tags=["Point"])
 router_linestring = APIRouter(prefix='/api/linestring', tags=["Linestring"])
 router_polygon = APIRouter(prefix='/api/polygon', tags=["Polygon"])
-router_gis = APIRouter(prefix='/api/gis', tags=["Gis"])
+router_gis = APIRouter(prefix='/api/gis', tags=["Geo"])
 
 
 # ------------------------------
