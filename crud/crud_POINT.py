@@ -20,9 +20,14 @@ async def get_point_by_id(db: AsyncSession, point_id: int,userid: int) -> PointF
         where(PointFeature.id == point_id,PointFeature.userid == userid))
     return result.scalar_one_or_none()
 
-async def get_all_points(db: AsyncSession,userid: int):
+async def get_all_points(db: AsyncSession,userid: int,page: int = 1):
     """查询所有点位"""
-    result_all = await db.execute(select(PointFeature).where(PointFeature.userid == userid))
+    skip = (page-1)*6
+
+    result_all = await db.execute(select(PointFeature)
+                    .where(PointFeature.userid == userid)
+                    .order_by(PointFeature.id).offset(skip).limit(6))
+
     result_count = await db.execute(select(func.count(PointFeature.id)).where(PointFeature.userid == userid))
     return result_all.scalars().all(), result_count.scalar()
 

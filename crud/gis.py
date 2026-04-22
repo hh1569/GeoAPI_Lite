@@ -19,7 +19,7 @@ async def get_id_geometry(db: AsyncSession,table,tableid,userid: int):
 # ------------------------------
 # GIS核心空间查询
 # ------------------------------
-async def get_nearby(db: AsyncSession, lon: float, lat: float, radius: float, table, userid: int):
+async def get_nearby(db: AsyncSession, lon: float, lat: float, radius: float, table, userid: int,page: int):
     """
     附近点位查询（GIS核心功能）
     :param lon: 中心点经度
@@ -30,13 +30,15 @@ async def get_nearby(db: AsyncSession, lon: float, lat: float, radius: float, ta
     # ST_Transform：坐标转换，4326转3857（墨卡托投影，单位米）
     #ST_MakePoint：生成空间点数据
     #ST_SetSRID： 给这个点设置坐标系
+    stmt = (page-1)*6
+
     query = select(table).where(table.userid == userid,
                                 func.ST_DWithin(
             func.ST_Transform(table.geom, 3857),
             func.ST_Transform(func.ST_SetSRID(func.ST_MakePoint(lon, lat), 4326), 3857),
             radius
         )
-                                )
+     ).order_by(table.id).offset(stmt).limit(6)
     result = await db.execute(query)
     return result.scalars().all()
 
@@ -48,6 +50,7 @@ async def get_by_bbox(
     max_lat: float,
     table,
     userid: int,
+    page: int
 ):
     """
     矩形范围查询（bbox查询，地图常用）
@@ -58,15 +61,23 @@ async def get_by_bbox(
     """
     # ST_MakeEnvelope：创建矩形范围
     # ST_Intersects：判断两个几何是否相交
+
+    stmt = (page - 1) * 6
+
     bbox = func.ST_MakeEnvelope(min_lon, min_lat, max_lon, max_lat, 4326)
-    query = select(table).where(table.userid==userid,func.ST_Intersects(table.geom, bbox))
+    query = (select(table)
+             .where(table.userid==userid,func.ST_Intersects(table.geom, bbox))
+             .order_by(table.id).offset(stmt).limit(6))
     result = await db.execute(query)
     return result.scalars().all()
 
-async def get_by_geometry(db: AsyncSession,table_1,table_2,userid: int,table1_id: int,):
+async def get_by_geometry(db: AsyncSession,table_1,table_2,userid: int,table1_id: int,page: int):
     """要素相交查询"""
     #ST_Union将多个要素 union 成一个几何
     # scalar_subquery()感觉是为了代替db.execute，但是为了只执行一次，所以使用。一条 SQL 里直接嵌套子查询
+
+    stmt = (page - 1) * 6
+
     if table1_id:
     #查询单一要素
         subquery = (select(table_1.geom)
@@ -81,7 +92,7 @@ async def get_by_geometry(db: AsyncSession,table_1,table_2,userid: int,table1_id
     query_all = ((select(table_2))
                  .where(table_2.userid == userid
                         , func.ST_Intersects(table_2.geom, subquery)
-                            )
+                            ).order_by(table_2.id).offset(stmt).limit(6)
                      )
 
 
@@ -122,10 +133,13 @@ async def get_geometry_geometry(db: AsyncSession,userid: int,id_1: int,id_2: int
 
     return row.distance, mapping(to_shape(row.closest_point))
 
-async def geometry_in_geometry(db: AsyncSession,table_1,table_2,userid: int,table1_id: int):
+async def geometry_in_geometry(db: AsyncSession,table_1,table_2,userid: int,table1_id: int,page: int):
     """要素包含查询"""
     # ST_Within (几何 A, 几何 B)  A 的全部 是否 完全在 B 内部
     #拿到 面(多边形) 的 geom
+
+    stmt = (page - 1) * 6
+
     verify = await get_id_geometry(db=db,table=table_1,tableid=table1_id,userid=userid)
     if not verify:
         return None
@@ -147,7 +161,7 @@ async def geometry_in_geometry(db: AsyncSession,table_1,table_2,userid: int,tabl
             # PostGIS 核心判断：要素 是否 在 面 内
             func.ST_Within(table_2.geom, subquery),
             table_2.userid == userid
-        )
+        ).order_by(table_2.id).offset(stmt).limit(6)
     )
     # 执行查询
     result = await db.execute(query)

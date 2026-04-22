@@ -19,9 +19,15 @@ async def get_polygon_by_id(db: AsyncSession, polygon_id: int,userid: int):
     where(PolygonFeature.id == polygon_id,PolygonFeature.userid == userid))
     return result.scalar_one_or_none()
 
-async def get_all_polygons(db: AsyncSession,userid: int):
+async def get_all_polygons(db: AsyncSession,userid: int,page: int = 1):
     """查询所有面"""
-    result_all = await db.execute(select(PolygonFeature).where(PolygonFeature.userid == userid))
+
+    stmt = (page-1)*6
+
+    result_all = await db.execute(select(PolygonFeature)
+                    .where(PolygonFeature.userid == userid)
+                    .order_by(PolygonFeature.id).offset(stmt).limit(6))
+
     result_count = await db.execute(select(func.count(PolygonFeature.id)).where(PolygonFeature.userid == userid))
     return result_all.scalars().all(), result_count.scalar()
 

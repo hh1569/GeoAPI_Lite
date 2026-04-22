@@ -13,9 +13,14 @@ async def create_linestring(db: AsyncSession, linestring_data, userid: int) -> L
     return add_linestring
 
 
-async def get_all_linestrings(db: AsyncSession,userid: int):
+async def get_all_linestrings(db: AsyncSession,userid: int,page: int = 1):
     """查询所有线"""
-    result_all = await db.execute(select(LinestringFeature).where(LinestringFeature.userid == userid))
+    skip = (page-1)*6
+
+    result_all = await db.execute(select(LinestringFeature)
+                    .where(LinestringFeature.userid == userid)
+                    .order_by(LinestringFeature.id).offset(skip).limit(6))
+
     result_count = await db.execute(select(func.count(LinestringFeature.id)).where(LinestringFeature.userid == userid))
     return result_all.scalars().all(), result_count.scalar()
 
