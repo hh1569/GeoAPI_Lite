@@ -16,13 +16,13 @@ class NearbyQuery(BaseModel):
         lat = values.get("lat")
 
         # 手动判断 + 抛出自定义异常
-        if lon is not None and not (-180 <= lon <= 180):
+        if lon is not None and not (-180 <= int(lon) <= 180):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="经度必须在 -180 ~ 180 之间"
             )
 
-        if lat is not None and not (-90 <= lat <= 90):
+        if lat is not None and not (-90 <= int(lat) <= 90):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="纬度必须在 -90 ~ 90 之间"
@@ -47,13 +47,13 @@ class BboxQuery(BaseModel):
         max_lon = values.get("max_lon")
         max_lat = values.get("max_lat")
 
-        if min_lon is not None and not (-180 <= min_lon <= 180) or max_lon is not None and not (-180 <= max_lon <= 180):
+        if min_lon is not None and not (-180 <= int(min_lon) <= 180) or max_lon is not None and not (-180 <= max_lon <= 180):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="经度必须在 -180 ~ 180 之间"
             )
 
-        if min_lat is not None and not (-90 <= min_lat <= 90) or max_lat is not None and not (-90 <= max_lat <= 90):
+        if min_lat is not None and not (-90 <= int(min_lat) <= 90) or max_lat is not None and not (-90 <= max_lat <= 90):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="纬度必须在 -90 ~ 90 之间"
