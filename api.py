@@ -103,18 +103,18 @@ async def create_polygon(
     return polygon_in.to_geojson_feature()
 
 @router_point.get("/list", summary="查询所有点位")
-async def get_all_points(db: AsyncSession = Depends(get_db),user: User = Depends(current_user)):
-    points_all,points_count = await crud_POINT.get_all_points(db=db,userid=user.userid)
+async def get_all_points(page: int = Query(1,ge=1),db: AsyncSession = Depends(get_db),user: User = Depends(current_user)):
+    points_all,points_count = await crud_POINT.get_all_points(db=db,userid=user.userid,page=page)
     return  to_feature_collection(points_all)
 
 @router_linestring.get("/list", summary="查询所有线位")
-async def get_all_linestring(db: AsyncSession = Depends(get_db),user: User = Depends(current_user)):
-    linestrings_all,linestrings_count = await crud_LINESTRING.get_all_linestrings(db=db,userid=user.userid)
+async def get_all_linestring(page: int = Query(1,ge=1),db: AsyncSession = Depends(get_db),user: User = Depends(current_user)):
+    linestrings_all,linestrings_count = await crud_LINESTRING.get_all_linestrings(db=db,userid=user.userid,page=page)
     return to_feature_collection(linestrings_all)
 
 @router_polygon.get("/list", summary="查询所有面")
-async def get_all_polygon(db: AsyncSession = Depends(get_db),user: User = Depends(current_user)):
-    polygons_all,polygons_count = await crud_POLYGON.get_all_polygons(db=db,userid=user.userid)
+async def get_all_polygon(page: int = Query(1,ge=1),db: AsyncSession = Depends(get_db),user: User = Depends(current_user)):
+    polygons_all,polygons_count = await crud_POLYGON.get_all_polygons(db=db,userid=user.userid,page=page)
     return to_feature_collection(polygons_all)
 
 @router_point.get("/{point_id}", summary="根据ID查询点位", response_model=schemas_POINT.PointDetail)
@@ -232,19 +232,19 @@ async def delete_polygon(
 async def get_nearby(
     query: schemas_GIS.NearbyQuery,
     user: User = Depends(current_user),
-    db: AsyncSession = Depends(get_db)
-
+    db: AsyncSession = Depends(get_db),
+    page: int =  Query(1,ge=1)
 ):
     points = await gis.get_nearby(
-        db=db, lon=query.lon, lat=query.lat, radius=query.radius, table=PointFeature,userid=user.userid
+        db=db, lon=query.lon, lat=query.lat, radius=query.radius, table=PointFeature,userid=user.userid,page=page
     )
 
     linestring = await gis.get_nearby(
-        db=db, lon=query.lon, lat=query.lat, radius=query.radius, table=LinestringFeature,userid=user.userid
+        db=db, lon=query.lon, lat=query.lat, radius=query.radius, table=LinestringFeature,userid=user.userid,page=page
     )
 
     polygon = await gis.get_nearby(
-        db=db, lon=query.lon, lat=query.lat, radius=query.radius, table=PolygonFeature,userid=user.userid
+        db=db, lon=query.lon, lat=query.lat, radius=query.radius, table=PolygonFeature,userid=user.userid,page=page
     )
     return {'point':to_feature_collection(points),
             'linestring':to_feature_collection(linestring),
@@ -256,18 +256,19 @@ async def get_nearby(
 async def get_by_bbox(
     query: schemas_GIS.BboxQuery,
     user: User = Depends(current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    page: int = Query(1,ge=1)
 ):
     points = await gis.get_by_bbox(
-        db=db, min_lon=query.min_lon, min_lat=query.min_lat, max_lon=query.max_lon, max_lat=query.max_lat,table=PointFeature,userid=user.userid
+        db=db, min_lon=query.min_lon, min_lat=query.min_lat, max_lon=query.max_lon, max_lat=query.max_lat,table=PointFeature,userid=user.userid,page=page
     )
 
     linestring = await gis.get_by_bbox(
-        db=db, min_lon=query.min_lon, min_lat=query.min_lat, max_lon=query.max_lon, max_lat=query.max_lat,table=LinestringFeature,userid=user.userid
+        db=db, min_lon=query.min_lon, min_lat=query.min_lat, max_lon=query.max_lon, max_lat=query.max_lat,table=LinestringFeature,userid=user.userid,page=page
     )
 
     polygon = await gis.get_by_bbox(
-        db=db, min_lon=query.min_lon, min_lat=query.min_lat, max_lon=query.max_lon, max_lat=query.max_lat,table=PolygonFeature,userid=user.userid
+        db=db, min_lon=query.min_lon, min_lat=query.min_lat, max_lon=query.max_lon, max_lat=query.max_lat,table=PolygonFeature,userid=user.userid,page=page
     )
     return {'point':to_feature_collection(points),
             'linestring':to_feature_collection(linestring),
@@ -279,13 +280,14 @@ async def get_by_geometry(
         table_1: LayerName = Query(...,description="范围图层、要素"),
         table_2: LayerName = Query(...,description="查询图层、要素"),
         db: AsyncSession = Depends(get_db),user: User = Depends(current_user),
-        table1_id: int = Query(None,description="范围图层、要素id，不填则所有要素合并去查询")
+        table1_id: int = Query(None,description="范围图层、要素id，不填则所有要素合并去查询"),
+        page: int = Query(1,ge=1)
 ):
 #table_1自动获取成员LayerName.point
     table_1 = LAYER_MODEL_MAP[table_1]
     table_2 = LAYER_MODEL_MAP[table_2]
 
-    geometry = await gis.get_by_geometry(db=db,userid=user.userid,table_1=table_1,table_2=table_2,table1_id=table1_id)
+    geometry = await gis.get_by_geometry(db=db,userid=user.userid,table_1=table_1,table_2=table_2,table1_id=table1_id,page=page)
     return to_feature_collection(geometry)
 
 @router_gis.get("/distance",summary="要素距离计算 / 要素到要素的最近点投影（第二个图层上，离第一个最近的那个点坐标）")
@@ -314,12 +316,13 @@ async def get_geometry_in_geometry(
         table_1:LayerName = Query(...,description="第一个要素、图层"),
         table_2:LayerName = Query(...,description="第二个要素、图层"),
         table1_id:int = Query(None,description="第一个要素、图层id"),
-        db: AsyncSession = Depends(get_db),user: User = Depends(current_user)
+        db: AsyncSession = Depends(get_db),user: User = Depends(current_user),
+        page: int = Query(1,ge=1)
 ):
     table_1 = LAYER_MODEL_MAP[table_1]
     table_2 = LAYER_MODEL_MAP[table_2]
 
-    in_geometry = await gis.geometry_in_geometry(db=db,table_1=table_1,table_2=table_2,userid=user.userid,table1_id=table1_id)
+    in_geometry = await gis.geometry_in_geometry(db=db,table_1=table_1,table_2=table_2,userid=user.userid,table1_id=table1_id,page=page)
     if in_geometry is None:
         raise HTTPException(status_code=404,detail="id不存在")
     return to_feature_collection(in_geometry)
