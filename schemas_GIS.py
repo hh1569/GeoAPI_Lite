@@ -47,13 +47,13 @@ class BboxQuery(BaseModel):
         max_lon = values.get("max_lon")
         max_lat = values.get("max_lat")
 
-        if min_lon is not None and not (-180 <= float(min_lon) <= 180) or max_lon is not None and not (-180 <= max_lon <= 180):
+        if min_lon is not None and not (-180 <= float(min_lon) <= 180) or max_lon is not None and not (-180 <= float(max_lon) <= 180):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="经度必须在 -180 ~ 180 之间"
             )
 
-        if min_lat is not None and not (-90 <= float(min_lat) <= 90) or max_lat is not None and not (-90 <= max_lat <= 90):
+        if min_lat is not None and not (-90 <= float(min_lat) <= 90) or max_lat is not None and not (-90 <= float(max_lat) <= 90):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="纬度必须在 -90 ~ 90 之间"
