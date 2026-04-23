@@ -31,7 +31,8 @@ class UserToken(Base):
 #点位表
 class PointFeature(Base):
     __tablename__ = "point_feature"
-    __table_args__ = {"comment": "空间点位表"}
+    __table_args__ = (Index('idx_pois_geom', 'geom', postgresql_using='gist'),{"comment": "空间点位表"})
+
 
     # 业务字段
     name: Mapped[str] = mapped_column(String(100), nullable=False, comment="点位名称")
@@ -77,8 +78,9 @@ class PointFeature(Base):
 
     def to_geojson_feature(self) -> dict:
         """将要素转为标准 GeoJSON Feature 对象"""
-        # 利用 geoalchemy2.shape.to_shape 将数据库几何转为 shapely 对象
-        from geoalchemy2.shape import to_shape
+        # to_shape 将一个 数据库几何对象（WKBElement 或 WKTElement）转换成 Shapely 几何对象。它不仅能处理 WKB，也能处理 WKT 格式的封装对象。
+        # from_shape：将一个 Shapely 几何对象 转换成 WKBElement（即数据库可存储的 WKB 格式的封装对象）。
+        from geoalchemy2.shape import to_shape,from_shape
         from shapely.geometry import mapping
         geom_shapely = to_shape(self.geom)
         geometry_dict = mapping(geom_shapely)  # 自动生成 {"type": "Point", "coordinates": [lon, lat]}
@@ -101,7 +103,8 @@ class PointFeature(Base):
 #线位表
 class LinestringFeature(Base):
     __tablename__ = "Linestring_feature"
-    __table_args__ = {"comment": "空间线位表"}
+    __table_args__ = (Index('idx_pois_geom', 'geom', postgresql_using='gist'),{"comment": "空间线位表"})
+
 
     name: Mapped[str] = mapped_column(String(100), nullable=False, comment="线位名称")
     id: Mapped[int] = mapped_column(primary_key=True, comment="主键ID")
@@ -163,7 +166,8 @@ class LinestringFeature(Base):
 #面位表
 class PolygonFeature(Base):
     __tablename__ = "Polygon_feature"
-    __table_args__ = {"comment": "空间面位表"}
+    __table_args__ = (Index('idx_pois_geom', 'geom', postgresql_using='gist'),{"comment": "空间面位表"})
+
 
     name: Mapped[str] = mapped_column(String(100), nullable=False, comment="面位名称")
     id: Mapped[int] = mapped_column(primary_key=True, comment="主键ID")
