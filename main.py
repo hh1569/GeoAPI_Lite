@@ -17,7 +17,7 @@ async def lifespan(app: FastAPI):
 # FastAPI应用实例
 app = FastAPI(
     title="FastAPI+PostGIS 平面位置管理系统",
-    description="支持点位CRUD、附近查询、范围查询",
+    description="支持点位CRUD、附近查询、范围查询  --坐标支持（4326 (WGS84 GPS坐标)、4490 (CGCS2000 国家大地坐标系)、3857 (Web墨卡托投影)，默认4326）",
     version="1.0.0",
     lifespan=lifespan
 )

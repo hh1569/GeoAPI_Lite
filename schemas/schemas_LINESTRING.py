@@ -8,6 +8,8 @@ from starlette import status
 from shapely.wkt import loads
 # from shapely.wkb import loads
 
+from utils.mapping_table import CoordSys
+
 
 class LinestringCreate(BaseModel):
     """创建线位入参"""
@@ -18,11 +20,17 @@ class LinestringCreate(BaseModel):
         description="WKT格式线要素，例：LINESTRING(120 30, 121 31)",
         examples=["LINESTRING(120.0 30.0, 121.0 31.0)"]
     )
+    coord_sys: int = Field(
+        default=4326,
+        description="坐标系SRID，默认4326(WGS84)。常用：4326(WGS84), 4490(CGCS2000), 3857(Web墨卡托)",
+        examples=[4326, 4490, 3857]
+    )
 
     @model_validator(mode="before")
     def check_geom_coords(cls, values):
-        # 1. 取出 geom
+        # 1. 取出 geom 和 coord_sys
         geom_wkt = values.get("geom")
+        coord_sys = values.get("coord_sys", 4326)
 
         if not geom_wkt:
             raise HTTPException(
@@ -43,20 +51,21 @@ class LinestringCreate(BaseModel):
                 detail="geom 格式不正确，请传入合法的 WKT 格式"
             )
 
-        # 4. 遍历所有点，每个点都校验经纬度
-        for lon, lat in all_coords:
-            # 经度校验
-            if not (-180 <= lon <= 180):
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"geom 中存在不合法经度：{lon}，必须在 -180 ~ 180 之间"
-                )
-            # 纬度校验
-            if not (-90 <= lat <= 90):
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"geom 中存在不合法纬度：{lat}，必须在 -90 ~ 90 之间"
-                )
+        # 4. 只有 4326/4490 地理坐标系才校验经纬度范围
+        if coord_sys in (4326, 4490):
+            for lon, lat in all_coords:
+                # 经度校验
+                if not (-180 <= lon <= 180):
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"geom 中存在不合法经度：{lon}，必须在 -180 ~ 180 之间"
+                    )
+                # 纬度校验
+                if not (-90 <= lat <= 90):
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"geom 中存在不合法纬度：{lat}，必须在 -90 ~ 90 之间"
+                    )
 
         return values
 
@@ -70,11 +79,17 @@ class LinestringUpdate(BaseModel):
         description="WKT格式线要素",
         examples=["LINESTRING(120.0 30.0, 121.0 31.0)"]
     )
+    coord_sys: int | None = Field(
+        default=None,
+        description="坐标系SRID，默认不转换。常用：4326(WGS84), 4490(CGCS2000), 3857(Web墨卡托)",
+        examples=[4326, 4490, 3857]
+    )
 
     @model_validator(mode="before")
     def check_geom_coords(cls, values):
-        # 1. 取出 geom
+        # 1. 取出 geom 和 coord_sys
         geom_wkt = values.get("geom")
+        coord_sys = values.get("coord_sys", 4326)
         if not geom_wkt:
             return values
 
@@ -91,20 +106,21 @@ class LinestringUpdate(BaseModel):
                 detail="geom 格式不正确，请传入合法的 WKT 格式"
             )
 
-        # 4. 遍历所有点，每个点都校验经纬度
-        for lon, lat in all_coords:
-            # 经度校验
-            if not (-180 <= lon <= 180):
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"geom 中存在不合法经度：{lon}，必须在 -180 ~ 180 之间"
-                )
-            # 纬度校验
-            if not (-90 <= lat <= 90):
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"geom 中存在不合法纬度：{lat}，必须在 -90 ~ 90 之间"
-                )
+        # 4. 只有 4326/4490 地理坐标系才校验经纬度范围
+        if coord_sys in (4326, 4490):
+            for lon, lat in all_coords:
+                # 经度校验
+                if not (-180 <= lon <= 180):
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"geom 中存在不合法经度：{lon}，必须在 -180 ~ 180 之间"
+                    )
+                # 纬度校验
+                if not (-90 <= lat <= 90):
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"geom 中存在不合法纬度：{lat}，必须在 -90 ~ 90 之间"
+                    )
 
         return values
 
@@ -116,9 +132,10 @@ class Properties(BaseModel):
     id: int
     userid: int
     name: str
-    address: str =  None
-    create_time: str = None
-    update_time: str = None
+    address: str | None = None
+    coord_sys: int = 4326
+    create_time: str | None = None
+    update_time: str | None = None
 
 class LinestringDetail(BaseModel):
     """点位详情出参"""

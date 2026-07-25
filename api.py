@@ -10,7 +10,7 @@ from crud import crud_POINT, crud_LINESTRING,crud_POLYGON,gis,crud_user,crud_tok
 from models import PointFeature, LinestringFeature, PolygonFeature, User
 from utils.auth import current_user
 from utils.geojson import to_feature_collection
-from utils.mapping_table import LayerName,LAYER_MODEL_MAP
+from utils.mapping_table import LayerName,LAYER_MODEL_MAP,CoordSys
 # 路由实例
 router_user = APIRouter(prefix="/user", tags=["user"])
 
@@ -103,27 +103,43 @@ async def create_polygon(
     return polygon_in.to_geojson_feature()
 
 @router_point.get("/list", summary="查询所有点位")
-async def get_all_points(page: int = Query(1,ge=1),db: AsyncSession = Depends(get_db),user: User = Depends(current_user)):
-    points_all,points_count = await crud_POINT.get_all_points(db=db,userid=user.userid,page=page)
-    return  to_feature_collection(points_all)
+async def get_all_points(
+    page: int = Query(1,ge=1),
+    output_coord_sys: int = Query(default=4326, description="输出坐标系SRID，默认4326(WGS84)。常用：4326(WGS84), 4490(CGCS2000), 3857(Web墨卡托)"),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(current_user)
+):
+    points_all,points_count = await crud_POINT.get_all_points(db=db,userid=user.userid,page=page,output_coord_sys=output_coord_sys)
+    return to_feature_collection(points_all)
 
 @router_linestring.get("/list", summary="查询所有线位")
-async def get_all_linestring(page: int = Query(1,ge=1),db: AsyncSession = Depends(get_db),user: User = Depends(current_user)):
-    linestrings_all,linestrings_count = await crud_LINESTRING.get_all_linestrings(db=db,userid=user.userid,page=page)
+async def get_all_linestring(
+    page: int = Query(1,ge=1),
+    output_coord_sys: int = Query(default=4326, description="输出坐标系SRID，默认4326(WGS84)。常用：4326(WGS84), 4490(CGCS2000), 3857(Web墨卡托)"),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(current_user)
+):
+    linestrings_all,linestrings_count = await crud_LINESTRING.get_all_linestrings(db=db,userid=user.userid,page=page,output_coord_sys=output_coord_sys)
     return to_feature_collection(linestrings_all)
 
 @router_polygon.get("/list", summary="查询所有面")
-async def get_all_polygon(page: int = Query(1,ge=1),db: AsyncSession = Depends(get_db),user: User = Depends(current_user)):
-    polygons_all,polygons_count = await crud_POLYGON.get_all_polygons(db=db,userid=user.userid,page=page)
+async def get_all_polygon(
+    page: int = Query(1,ge=1),
+    output_coord_sys: int = Query(default=4326, description="输出坐标系SRID，默认4326(WGS84)。常用：4326(WGS84), 4490(CGCS2000), 3857(Web墨卡托)"),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(current_user)
+):
+    polygons_all,polygons_count = await crud_POLYGON.get_all_polygons(db=db,userid=user.userid,page=page,output_coord_sys=output_coord_sys)
     return to_feature_collection(polygons_all)
 
 @router_point.get("/{point_id}", summary="根据ID查询点位", response_model=schemas_POINT.PointDetail)
 async def get_point_detail(
     point_id: int,
+    output_coord_sys: int = Query(default=4326, description="输出坐标系SRID，默认4326(WGS84)。常用：4326(WGS84), 4490(CGCS2000), 3857(Web墨卡托)"),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(current_user)
 ):
-    point = await crud_POINT.get_point_by_id(db=db, point_id=point_id,userid=user.userid)
+    point = await crud_POINT.get_point_by_id(db=db, point_id=point_id,userid=user.userid,output_coord_sys=output_coord_sys)
     if not point:
         raise HTTPException(status_code=404, detail="点位不存在")
     return point.to_geojson_feature()
@@ -131,21 +147,23 @@ async def get_point_detail(
 @router_linestring.get("/{linestring_id}", summary="根据ID查询线", response_model=schemas_LINESTRING.LinestringDetail)
 async def get_linestring_detail(
         linestring_id: int,
+        output_coord_sys: int = Query(default=4326, description="输出坐标系SRID，默认4326(WGS84)。常用：4326(WGS84), 4490(CGCS2000), 3857(Web墨卡托)"),
         db: AsyncSession = Depends(get_db),
         user: User = Depends(current_user)
 ):
-    linestring = await crud_LINESTRING.get_linestring_by_id(db, linestring_id,userid=user.userid)
+    linestring = await crud_LINESTRING.get_linestring_by_id(db, linestring_id,userid=user.userid,output_coord_sys=output_coord_sys)
     if not linestring:
         raise HTTPException(status_code=404, detail="线不存在")
     return linestring.to_geojson_feature()
 
-@router_polygon.get("/{linestring_id}", summary="根据ID查询面",response_model=schemas_POLYGON.PolygonDetail)
-async def get_linestring_detail(
+@router_polygon.get("/{polygon_id}", summary="根据ID查询面",response_model=schemas_POLYGON.PolygonDetail)
+async def get_polygon_detail(
         polygon_id: int,
+        output_coord_sys: int = Query(default=4326, description="输出坐标系SRID，默认4326(WGS84)。常用：4326(WGS84), 4490(CGCS2000), 3857(Web墨卡托)"),
         db: AsyncSession = Depends(get_db),
         user: User = Depends(current_user)
 ):
-    polygon = await crud_POLYGON.get_polygon_by_id(db, polygon_id,userid=user.userid)
+    polygon = await crud_POLYGON.get_polygon_by_id(db, polygon_id,userid=user.userid,output_coord_sys=output_coord_sys)
     if not polygon:
         raise HTTPException(status_code=404, detail="面不存在")
     return polygon.to_geojson_feature()
@@ -231,6 +249,7 @@ async def delete_polygon(
 @router_gis.post("/nearby", summary="附近点位查询")
 async def get_nearby(
     query: schemas_GIS.NearbyQuery,
+    output_coord_sys: int = Query(default=4326, description="输出坐标系SRID，默认4326(WGS84)。常用：4326(WGS84), 4490(CGCS2000), 3857(Web墨卡托)"),
     user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
     page: int =  Query(1,ge=1)
@@ -255,6 +274,7 @@ async def get_nearby(
 @router_gis.post("/bbox", summary="矩形范围查询")
 async def get_by_bbox(
     query: schemas_GIS.BboxQuery,
+    output_coord_sys: int = Query(default=4326, description="输出坐标系SRID，默认4326(WGS84)。常用：4326(WGS84), 4490(CGCS2000), 3857(Web墨卡托)"),
     user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
     page: int = Query(1,ge=1)
@@ -279,6 +299,7 @@ async def get_by_bbox(
 async def get_by_geometry(
         table_1: LayerName = Query(...,description="范围图层、要素"),
         table_2: LayerName = Query(...,description="查询图层、要素"),
+        output_coord_sys: int = Query(default=4326, description="输出坐标系SRID，默认4326(WGS84)。常用：4326(WGS84), 4490(CGCS2000), 3857(Web墨卡托)"),
         db: AsyncSession = Depends(get_db),user: User = Depends(current_user),
         table1_id: int = Query(None,description="范围图层、要素id，不填则所有要素合并去查询"),
         page: int = Query(1,ge=1)
@@ -316,6 +337,7 @@ async def get_geometry_in_geometry(
         table_1:LayerName = Query(...,description="第一个要素、图层"),
         table_2:LayerName = Query(...,description="第二个要素、图层"),
         table1_id:int = Query(None,description="第一个要素、图层id"),
+        output_coord_sys: int = Query(default=4326, description="输出坐标系SRID，默认4326(WGS84)。常用：4326(WGS84), 4490(CGCS2000), 3857(Web墨卡托)"),
         db: AsyncSession = Depends(get_db),user: User = Depends(current_user),
         page: int = Query(1,ge=1)
 ):

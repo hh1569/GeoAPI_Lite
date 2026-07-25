@@ -31,7 +31,7 @@ class UserToken(Base):
 #点位表
 class PointFeature(Base):
     __tablename__ = "point_feature"
-    __table_args__ = (Index('idx_pois_geom', 'geom', postgresql_using='gist'),{"comment": "空间点位表"})
+    __table_args__ = (Index('idx_point_geom', 'geom', postgresql_using='gist'),{"comment": "空间点位表"})
 
 
     # 业务字段
@@ -39,6 +39,7 @@ class PointFeature(Base):
     id: Mapped[int] = mapped_column(primary_key=True, comment="主键ID")
     userid: Mapped[int] = mapped_column(ForeignKey(User.userid), nullable=False, comment="用户id")
     address: Mapped[str | None] = mapped_column(String(255), comment="点位地址")
+    coord_sys: Mapped[int] = mapped_column(Integer, default=4326, comment="输入坐标系SRID")
 
     # GIS核心字段：POINT类型，4326坐标系（WGS84 GPS经纬度）
     geom: Mapped[Geometry] = mapped_column(
@@ -76,13 +77,17 @@ class PointFeature(Base):
             "update_time": self.update_time.strftime("%Y-%m-%d %H:%M:%S") if self.create_time else None
         }
 
-    def to_geojson_feature(self) -> dict:
-        """将要素转为标准 GeoJSON Feature 对象"""
+    def to_geojson_feature(self, output_coord_sys: int = 4326, transformed_geom=None) -> dict:
+        """将要素转为标准 GeoJSON Feature 对象，支持坐标系转换"""
         # to_shape 将一个 数据库几何对象（WKBElement 或 WKTElement）转换成 Shapely 几何对象。它不仅能处理 WKB，也能处理 WKT 格式的封装对象。
         # from_shape：将一个 Shapely 几何对象 转换成 WKBElement（即数据库可存储的 WKB 格式的封装对象）。
         from geoalchemy2.shape import to_shape,from_shape
         from shapely.geometry import mapping
-        geom_shapely = to_shape(self.geom)
+
+        # 使用转换后的几何对象（如果提供），否则使用原始几何
+        geom = transformed_geom if transformed_geom is not None else self.geom
+        geom_shapely = to_shape(geom)
+
         geometry_dict = mapping(geom_shapely)  # 自动生成 {"type": "Point", "coordinates": [lon, lat]}
 
         return {
@@ -93,6 +98,7 @@ class PointFeature(Base):
                 "userid": self.userid,
                 "name": self.name,
                 "address": self.address,
+                "coord_sys": self.coord_sys,
                 "create_time": self.create_time.isoformat() if self.create_time else None,
                 "update_time": self.update_time.isoformat() if self.update_time else None,
             }
@@ -103,13 +109,14 @@ class PointFeature(Base):
 #线位表
 class LinestringFeature(Base):
     __tablename__ = "Linestring_feature"
-    __table_args__ = (Index('idx_pois_geom', 'geom', postgresql_using='gist'),{"comment": "空间线位表"})
+    __table_args__ = (Index('idx_linestring_geom', 'geom', postgresql_using='gist'),{"comment": "空间线位表"})
 
 
     name: Mapped[str] = mapped_column(String(100), nullable=False, comment="线位名称")
     id: Mapped[int] = mapped_column(primary_key=True, comment="主键ID")
     userid: Mapped[int] = mapped_column(ForeignKey(User.userid), nullable=False, comment="用户id")
     address: Mapped[str | None] = mapped_column(String(255), comment="线位地址")
+    coord_sys: Mapped[int] = mapped_column(Integer, default=4326, comment="输入坐标系SRID")
 
     geom: Mapped[Geometry] = mapped_column(
         Geometry(geometry_type="LINESTRING", srid=4326),
@@ -139,14 +146,14 @@ class LinestringFeature(Base):
             "update_time": self.update_time.strftime("%Y-%m-%d %H:%M:%S")
         }
 
-    def to_geojson_feature(self) -> dict:
-        """将要素转为标准 GeoJSON Feature 对象"""
-        # 利用 geoalchemy2.shape.to_shape 将数据库几何转为 shapely 对象
+    def to_geojson_feature(self, output_coord_sys: int = 4326, transformed_geom=None) -> dict:
+        """将要素转为标准 GeoJSON Feature 对象，支持坐标系转换"""
         from geoalchemy2.shape import to_shape
         from shapely.geometry import mapping
 
-        geom_shapely = to_shape(self.geom)
-        geometry_dict = mapping(geom_shapely)  # 自动生成 {"type": "Point", "coordinates": [lon, lat]}
+        geom = transformed_geom if transformed_geom is not None else self.geom
+        geom_shapely = to_shape(geom)
+        geometry_dict = mapping(geom_shapely)
 
         return {
             "type": "Feature",
@@ -156,6 +163,7 @@ class LinestringFeature(Base):
                 "userid": self.userid,
                 "name": self.name,
                 "address": self.address,
+                "coord_sys": self.coord_sys,
                 "create_time": self.create_time.isoformat() if self.create_time else None,
                 "update_time": self.update_time.isoformat() if self.update_time else None,
             }
@@ -166,13 +174,14 @@ class LinestringFeature(Base):
 #面位表
 class PolygonFeature(Base):
     __tablename__ = "Polygon_feature"
-    __table_args__ = (Index('idx_pois_geom', 'geom', postgresql_using='gist'),{"comment": "空间面位表"})
+    __table_args__ = (Index('idx_polygon_geom', 'geom', postgresql_using='gist'),{"comment": "空间面位表"})
 
 
     name: Mapped[str] = mapped_column(String(100), nullable=False, comment="面位名称")
     id: Mapped[int] = mapped_column(primary_key=True, comment="主键ID")
     userid: Mapped[int] = mapped_column(ForeignKey(User.userid), nullable=False, comment="用户id")
     address: Mapped[str | None] = mapped_column(String(255), comment="面位地址")
+    coord_sys: Mapped[int] = mapped_column(Integer, default=4326, comment="输入坐标系SRID")
 
     geom: Mapped[Geometry] = mapped_column(
         Geometry(geometry_type="POLYGON", srid=4326),
@@ -197,14 +206,14 @@ class PolygonFeature(Base):
             "update_time": self.update_time.strftime("%Y-%m-%d %H:%M:%S")
         }
 
-    def to_geojson_feature(self) -> dict:
-        """将要素转为标准 GeoJSON Feature 对象"""
-        # 利用 geoalchemy2.shape.to_shape 将数据库几何转为 shapely 对象
+    def to_geojson_feature(self, output_coord_sys: int = 4326, transformed_geom=None) -> dict:
+        """将要素转为标准 GeoJSON Feature 对象，支持坐标系转换"""
         from geoalchemy2.shape import to_shape
         from shapely.geometry import mapping
 
-        geom_shapely = to_shape(self.geom)
-        geometry_dict = mapping(geom_shapely)  # 自动生成 {"type": "Point", "coordinates": [lon, lat]}
+        geom = transformed_geom if transformed_geom is not None else self.geom
+        geom_shapely = to_shape(geom)
+        geometry_dict = mapping(geom_shapely)
 
         return {
             "type": "Feature",
@@ -214,6 +223,7 @@ class PolygonFeature(Base):
                 "userid": self.userid,
                 "name": self.name,
                 "address": self.address,
+                "coord_sys": self.coord_sys,
                 "create_time": self.create_time.isoformat() if self.create_time else None,
                 "update_time": self.update_time.isoformat() if self.update_time else None,
             }

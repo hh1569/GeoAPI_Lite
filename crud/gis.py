@@ -236,6 +236,7 @@ async def import_file_point(db: AsyncSession, file: UploadFile, userid: int):
                 name=str(item["name"]),
                 address=str(item["address"]),
                 userid=int(userid),
+                coord_sys=4326,
                 geom=f"SRID=4326;POINT({lon} {lat})"
             )
             db.add(point)
@@ -286,6 +287,7 @@ async def import_file_linestring(db: AsyncSession, file: UploadFile, userid: int
                 name=str(item["name"]),
                 address=str(item["address"]),
                 userid=int(userid),
+                coord_sys=4326,
                 geom=f"SRID=4326;LINESTRING({coords_str})"
             )
             db.add(line)
@@ -337,6 +339,7 @@ async def import_file_polygon(db: AsyncSession, file: UploadFile, userid: int):
                 name=str(item["name"]),
                 address=str(item["address"]),
                 userid=int(userid),
+                coord_sys=4326,
                 geom=f"SRID=4326;POLYGON(({coords_str}))"
             )
             db.add(polygon)
