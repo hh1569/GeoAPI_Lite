@@ -5,13 +5,6 @@ from sqlalchemy import select, func
 from models import LinestringFeature
 
 
-def _transform_geom(model, output_coord_sys):
-    """返回转换后的geom列"""
-    if output_coord_sys != 4326:
-        return func.ST_Transform(model.geom, output_coord_sys).label('geom')
-    return model.geom
-
-
 def _to_linestring(row):
     """将查询结果转为LinestringFeature对象"""
     obj = LinestringFeature()
@@ -21,14 +14,11 @@ def _to_linestring(row):
 
 
 async def create_linestring(db: AsyncSession, linestring_data, userid: int) -> LinestringFeature:
-    """创建线，支持坐标系转换"""
+    """创建线，geom 存储用户指定的坐标系，与 coord_sys 一致"""
     data = linestring_data.model_dump()
     coord_sys = data.pop('coord_sys', 4326)
 
-    if coord_sys != 4326:
-        data['geom'] = func.ST_Transform(
-            func.ST_SetSRID(func.ST_GeomFromText(data['geom']), coord_sys), 4326
-        )
+    data['geom'] = func.ST_SetSRID(func.ST_GeomFromText(data['geom']), coord_sys)
 
     add_linestring = LinestringFeature(**data, userid=userid, coord_sys=coord_sys)
     db.add(add_linestring)
@@ -37,15 +27,14 @@ async def create_linestring(db: AsyncSession, linestring_data, userid: int) -> L
     return add_linestring
 
 
-async def get_all_linestrings(db: AsyncSession,userid: int,page: int = 1, output_coord_sys: int = 4326):
-    """查询所有线"""
+async def get_all_linestrings(db: AsyncSession,userid: int,page: int = 1):
+    """查询所有线（返回数据库原始坐标，不做坐标转换）"""
     skip = (page-1)*6
-    geom_col = _transform_geom(LinestringFeature, output_coord_sys)
 
     result_all = await db.execute(
         select(LinestringFeature.id, LinestringFeature.userid, LinestringFeature.name,
                LinestringFeature.address, LinestringFeature.coord_sys,
-               LinestringFeature.create_time, LinestringFeature.update_time, geom_col)
+               LinestringFeature.create_time, LinestringFeature.update_time, LinestringFeature.geom)
         .where(LinestringFeature.userid == userid)
         .order_by(LinestringFeature.id).offset(skip).limit(6)
     )
@@ -55,9 +44,12 @@ async def get_all_linestrings(db: AsyncSession,userid: int,page: int = 1, output
     return linestrings, result_count.scalar()
 
 
-async def get_linestring_by_id(db: AsyncSession, linestring_id: int,userid: int, output_coord_sys: int = 4326):
-    """根据ID查询线"""
-    geom_col = _transform_geom(LinestringFeature, output_coord_sys)
+async def get_linestring_by_id(db: AsyncSession, linestring_id: int, userid: int, output_coord_sys: int = None):
+    """根据ID查询线，output_coord_sys 为 None 时返回原始坐标"""
+    if output_coord_sys is not None:
+        geom_col = func.ST_Transform(LinestringFeature.geom, output_coord_sys).label('geom')
+    else:
+        geom_col = LinestringFeature.geom
     result = await db.execute(
         select(LinestringFeature.id, LinestringFeature.userid, LinestringFeature.name,
                LinestringFeature.address, LinestringFeature.coord_sys,

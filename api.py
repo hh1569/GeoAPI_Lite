@@ -6,7 +6,8 @@ from starlette import status
 
 from database import get_db
 from schemas import schemas_POINT,schemas_LINESTRING,schemas_POLYGON,schemas_GIS,schemas_USER
-from crud import crud_POINT, crud_LINESTRING,crud_POLYGON,gis,crud_user,crud_token
+from crud import crud_POINT, crud_LINESTRING, crud_POLYGON, gis, crud_user, crud_token
+from crud.gis import transform_features, validate_srid
 from models import PointFeature, LinestringFeature, PolygonFeature, User
 from utils.auth import current_user
 from utils.geojson import to_feature_collection
@@ -105,37 +106,34 @@ async def create_polygon(
 @router_point.get("/list", summary="查询所有点位")
 async def get_all_points(
     page: int = Query(1,ge=1),
-    output_coord_sys: int = Query(default=4326, description="输出坐标系SRID，默认4326(WGS84)。常用：4326(WGS84), 4490(CGCS2000), 3857(Web墨卡托)"),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(current_user)
 ):
-    points_all,points_count = await crud_POINT.get_all_points(db=db,userid=user.userid,page=page,output_coord_sys=output_coord_sys)
+    points_all,points_count = await crud_POINT.get_all_points(db=db,userid=user.userid,page=page)
     return to_feature_collection(points_all)
 
 @router_linestring.get("/list", summary="查询所有线位")
 async def get_all_linestring(
     page: int = Query(1,ge=1),
-    output_coord_sys: int = Query(default=4326, description="输出坐标系SRID，默认4326(WGS84)。常用：4326(WGS84), 4490(CGCS2000), 3857(Web墨卡托)"),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(current_user)
 ):
-    linestrings_all,linestrings_count = await crud_LINESTRING.get_all_linestrings(db=db,userid=user.userid,page=page,output_coord_sys=output_coord_sys)
+    linestrings_all,linestrings_count = await crud_LINESTRING.get_all_linestrings(db=db,userid=user.userid,page=page)
     return to_feature_collection(linestrings_all)
 
 @router_polygon.get("/list", summary="查询所有面")
 async def get_all_polygon(
     page: int = Query(1,ge=1),
-    output_coord_sys: int = Query(default=4326, description="输出坐标系SRID，默认4326(WGS84)。常用：4326(WGS84), 4490(CGCS2000), 3857(Web墨卡托)"),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(current_user)
 ):
-    polygons_all,polygons_count = await crud_POLYGON.get_all_polygons(db=db,userid=user.userid,page=page,output_coord_sys=output_coord_sys)
+    polygons_all,polygons_count = await crud_POLYGON.get_all_polygons(db=db,userid=user.userid,page=page)
     return to_feature_collection(polygons_all)
 
 @router_point.get("/{point_id}", summary="根据ID查询点位", response_model=schemas_POINT.PointDetail)
 async def get_point_detail(
     point_id: int,
-    output_coord_sys: int = Query(default=4326, description="输出坐标系SRID，默认4326(WGS84)。常用：4326(WGS84), 4490(CGCS2000), 3857(Web墨卡托)"),
+    output_coord_sys: int = Query(default=None, description="输出坐标系SRID，不传则返回原始坐标。常用：4326(WGS84), 4490(CGCS2000), 3857(Web墨卡托)"),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(current_user)
 ):
@@ -147,7 +145,7 @@ async def get_point_detail(
 @router_linestring.get("/{linestring_id}", summary="根据ID查询线", response_model=schemas_LINESTRING.LinestringDetail)
 async def get_linestring_detail(
         linestring_id: int,
-        output_coord_sys: int = Query(default=4326, description="输出坐标系SRID，默认4326(WGS84)。常用：4326(WGS84), 4490(CGCS2000), 3857(Web墨卡托)"),
+        output_coord_sys: int = Query(default=None, description="输出坐标系SRID，不传则返回原始坐标。常用：4326(WGS84), 4490(CGCS2000), 3857(Web墨卡托)"),
         db: AsyncSession = Depends(get_db),
         user: User = Depends(current_user)
 ):
@@ -159,7 +157,7 @@ async def get_linestring_detail(
 @router_polygon.get("/{polygon_id}", summary="根据ID查询面",response_model=schemas_POLYGON.PolygonDetail)
 async def get_polygon_detail(
         polygon_id: int,
-        output_coord_sys: int = Query(default=4326, description="输出坐标系SRID，默认4326(WGS84)。常用：4326(WGS84), 4490(CGCS2000), 3857(Web墨卡托)"),
+        output_coord_sys: int = Query(default=None, description="输出坐标系SRID，不传则返回原始坐标。常用：4326(WGS84), 4490(CGCS2000), 3857(Web墨卡托)"),
         db: AsyncSession = Depends(get_db),
         user: User = Depends(current_user)
 ):
@@ -349,7 +347,30 @@ async def get_geometry_in_geometry(
         raise HTTPException(status_code=404,detail="id不存在")
     return to_feature_collection(in_geometry)
 
-            
+
+@router_gis.get("/transform", summary="坐标转换（支持任意SRID）")
+async def transform_coord(
+        layer: LayerName = Query(..., description="图层类型：point、line、polygon"),
+        target_srid: int = Query(..., description="目标坐标系SRID，支持任意PostGIS已注册的SRID。常用：4326(WGS84)、4490(CGCS2000)、3857(Web墨卡托)"),
+        feature_ids: str = Query(default=None, description="指定要素ID，多个用逗号分隔，如 1,2,3。不传则查询全部"),
+        page: int = Query(1, ge=1),
+        db: AsyncSession = Depends(get_db),
+        user: User = Depends(current_user)
+):
+    """将数据库中的要素坐标转换到目标坐标系后返回，自动识别源坐标系"""
+    if not await validate_srid(db, target_srid):
+        raise HTTPException(status_code=400, detail=f"目标坐标系 SRID {target_srid} 不存在，请检查是否为有效的PostGIS SRID")
+
+    model = LAYER_MODEL_MAP[layer]
+    ids = [int(i.strip()) for i in feature_ids.split(",")] if feature_ids else None
+
+    features = await transform_features(
+        db=db, model=model, target_srid=target_srid,
+        userid=user.userid, feature_ids=ids, page=page
+    )
+    return to_feature_collection(features)
+
+
 @router_gis.get("/{linestring_id}/length",summary="计算线长度")
 async def get_linestring_length(linestring_id: int, db: AsyncSession = Depends(get_db),user: User = Depends(current_user)):
     length = await gis.get_linestring_length(db=db, linestring_id=linestring_id,userid=user.userid)
@@ -364,10 +385,10 @@ async def get_polygon_area(polygon_id: int, db: AsyncSession = Depends(get_db),u
         raise HTTPException(status_code=404,detail="面不存在")
     return {"id" : polygon_id, "area:" : area}
 
-@router_gis.post("/batch/import-excel",summary="导入要素(格式：116.300 39.900)")
+@router_gis.post("/batch/import-excel",summary="导入要素(Excel/CSV，支持coord_sys列指定坐标系)")
 async def import_(
         file: UploadFile,
-        type_:LayerName = Query(..., description="导入类型:point、lines、polygon"),
+        type_:LayerName = Query(..., description="导入类型:point、line、polygon"),
         db: AsyncSession = Depends(get_db),
         user: User = Depends(current_user)):
     if not file:
@@ -384,8 +405,8 @@ async def import_(
             polygon = await gis.import_file_polygon(db=db, file=file, userid=user.userid)
             return {"message": polygon}
         else:
-            raise HTTPException(status_code=400,detail=f"导入类型不支持：{type_}，仅支持：点、线、面，不可以多字少字")
-    except TypeError as e:
+            raise HTTPException(status_code=400,detail=f"导入类型不支持：{type_}，仅支持：point、line、polygon")
+    except (TypeError, ValueError) as e:
         raise HTTPException(status_code=400,detail=str(e))
 
 

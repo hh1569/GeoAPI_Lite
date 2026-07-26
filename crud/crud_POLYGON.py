@@ -3,13 +3,6 @@ from sqlalchemy import select, func
 from models import PolygonFeature
 
 
-def _transform_geom(model, output_coord_sys):
-    """返回转换后的geom列"""
-    if output_coord_sys != 4326:
-        return func.ST_Transform(model.geom, output_coord_sys).label('geom')
-    return model.geom
-
-
 def _to_polygon(row):
     """将查询结果转为PolygonFeature对象"""
     obj = PolygonFeature()
@@ -19,14 +12,11 @@ def _to_polygon(row):
 
 
 async def create_polygon(db: AsyncSession, polygon_data,userid: int):
-    """创建面，支持坐标系转换"""
+    """创建面，geom 存储用户指定的坐标系，与 coord_sys 一致"""
     data = polygon_data.model_dump()
     coord_sys = data.pop('coord_sys', 4326)
 
-    if coord_sys != 4326:
-        data['geom'] = func.ST_Transform(
-            func.ST_SetSRID(func.ST_GeomFromText(data['geom']), coord_sys), 4326
-        )
+    data['geom'] = func.ST_SetSRID(func.ST_GeomFromText(data['geom']), coord_sys)
 
     add_polygon = PolygonFeature(**data, userid=userid, coord_sys=coord_sys)
     db.add(add_polygon)
@@ -35,9 +25,12 @@ async def create_polygon(db: AsyncSession, polygon_data,userid: int):
     return add_polygon
 
 
-async def get_polygon_by_id(db: AsyncSession, polygon_id: int,userid: int, output_coord_sys: int = 4326):
-    """根据ID查询面"""
-    geom_col = _transform_geom(PolygonFeature, output_coord_sys)
+async def get_polygon_by_id(db: AsyncSession, polygon_id: int, userid: int, output_coord_sys: int = None):
+    """根据ID查询面，output_coord_sys 为 None 时返回原始坐标"""
+    if output_coord_sys is not None:
+        geom_col = func.ST_Transform(PolygonFeature.geom, output_coord_sys).label('geom')
+    else:
+        geom_col = PolygonFeature.geom
     result = await db.execute(
         select(PolygonFeature.id, PolygonFeature.userid, PolygonFeature.name,
                PolygonFeature.address, PolygonFeature.coord_sys,
@@ -48,15 +41,14 @@ async def get_polygon_by_id(db: AsyncSession, polygon_id: int,userid: int, outpu
     return _to_polygon(row) if row else None
 
 
-async def get_all_polygons(db: AsyncSession,userid: int,page: int = 1, output_coord_sys: int = 4326):
-    """查询所有面"""
+async def get_all_polygons(db: AsyncSession,userid: int,page: int = 1):
+    """查询所有面（返回数据库原始坐标，不做坐标转换）"""
     skip = (page-1)*6
-    geom_col = _transform_geom(PolygonFeature, output_coord_sys)
 
     result_all = await db.execute(
         select(PolygonFeature.id, PolygonFeature.userid, PolygonFeature.name,
                PolygonFeature.address, PolygonFeature.coord_sys,
-               PolygonFeature.create_time, PolygonFeature.update_time, geom_col)
+               PolygonFeature.create_time, PolygonFeature.update_time, PolygonFeature.geom)
         .where(PolygonFeature.userid == userid)
         .order_by(PolygonFeature.id).offset(skip).limit(6)
     )

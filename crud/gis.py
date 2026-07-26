@@ -5,11 +5,92 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from sqlalchemy import select, func
 
-from models import LinestringFeature,PolygonFeature
-from crud import crud_LINESTRING,crud_POLYGON
+from models import LinestringFeature, PolygonFeature, PointFeature
+from crud import crud_LINESTRING, crud_POLYGON
 
 async def test():
     pass
+
+
+# ------------------------------
+# 坐标转换
+# ------------------------------
+async def validate_srid(db: AsyncSession, srid: int) -> bool:
+    """
+    校验 SRID 是否在 PostGIS 的 spatial_ref_sys 表中存在。
+    :param db: 数据库会话
+    :param srid: 要校验的 SRID
+    :return: True 存在，False 不存在
+    """
+    from sqlalchemy import text
+    row = await db.execute(
+        text("SELECT COUNT(*) FROM spatial_ref_sys WHERE srid = :srid"),
+        {"srid": srid}
+    )
+    return row.scalar() > 0
+
+
+def transform_geom_col(model, target_srid: int):
+    """
+    返回 SQLAlchemy 列表达式，用于在 SQL 中对 geom 列做坐标转换。
+    ST_Transform 会自动从 geom 读取源 SRID。
+    :param model: ORM 模型（PointFeature / LinestringFeature / PolygonFeature）
+    :param target_srid: 目标坐标系 SRID
+    :return: SQLAlchemy 列表达式，可直接用于 select()
+    """
+    return func.ST_Transform(model.geom, target_srid).label('geom')
+
+
+async def transform_features(
+    db: AsyncSession,
+    model,
+    target_srid: int,
+    userid: int = None,
+    feature_ids: list[int] = None,
+    page: int = 1,
+    page_size: int = 6
+):
+    """
+    独立的坐标转换查询函数。
+    根据目标 SRID 对数据库中的要素进行坐标转换后返回。
+    ST_Transform 会自动从 geom 读取源 SRID。
+
+    :param db: 数据库会话
+    :param model: ORM 模型（PointFeature / LinestringFeature / PolygonFeature）
+    :param target_srid: 目标坐标系 SRID（如 3857、4490）
+    :param userid: 用户 ID（可选，用于过滤）
+    :param feature_ids: 指定要素 ID 列表（可选，不传则查询全部）
+    :param page: 页码（默认 1）
+    :param page_size: 每页数量（默认 6）
+    :return: 转换后的要素列表
+    """
+    geom_col = transform_geom_col(model, target_srid)
+    stmt = (
+        select(
+            model.id, model.userid, model.name, model.address,
+            model.coord_sys, model.create_time, model.update_time, geom_col
+        )
+    )
+
+    if userid is not None:
+        stmt = stmt.where(model.userid == userid)
+    if feature_ids:
+        stmt = stmt.where(model.id.in_(feature_ids))
+
+    skip = (page - 1) * page_size
+    stmt = stmt.order_by(model.id).offset(skip).limit(page_size)
+
+    result = await db.execute(stmt)
+    rows = result.all()
+
+    features = []
+    for row in rows:
+        obj = model()
+        for col in ['id', 'userid', 'name', 'address', 'coord_sys', 'create_time', 'update_time', 'geom']:
+            setattr(obj, col, getattr(row, col))
+        features.append(obj)
+
+    return features
 
 async def get_id_geometry(db: AsyncSession,table,tableid,userid: int):
     result = await db.execute(select(table).
@@ -201,14 +282,12 @@ import io
 
 async def import_file_point(db: AsyncSession, file: UploadFile, userid: int):
     """导入Excel文件数据"""
-    # 检查文件类型,endswith判断一个字符串结尾,多个参数必须填元组
     filename = file.filename.lower()
-    if not filename.endswith(('.xlsx', '.xls', 'csv')):
+    if not filename.endswith(('.xlsx', '.xls', '.csv')):
         raise ValueError("文件后缀为 .xlsx, .xls, .csv")
     contents = await file.read()
     try:
         if filename.endswith(('.xlsx', '.xls')):
-        # 读取文件内容
             df = pandas.read_excel(io.BytesIO(contents))
         else:
             df = pandas.read_csv(io.BytesIO(contents))
@@ -216,33 +295,40 @@ async def import_file_point(db: AsyncSession, file: UploadFile, userid: int):
         # 检查必要列
         required_columns = ['name', 'address', 'lon', 'lat']
         for col in required_columns:
-            if col not in df.columns:#获取这个 Excel 表格的 所有列名
+            if col not in df.columns:
                 raise ValueError(f"Excel 文件缺少必要列: {col}")
+
+        has_coord_sys = 'coord_sys' in df.columns
 
         # 转换数据
         data_list = df.to_dict(orient="records")
         i = 0
         list_exception = []
         # 批量添加数据
-        for start,item in enumerate(data_list,start=1):
+        for start, item in enumerate(data_list, start=1):
             lon = item["lon"]
             lat = item['lat']
-            if not lon or not lat or not (-180 <= lon <= 180 and -90 <= lat <= 90):
-                i+=1
-                list_exception.append(start)
-                continue
+            coord_sys = int(item.get('coord_sys', 4326)) if has_coord_sys else 4326
+
+            # 4326/4490 地理坐标系才校验经纬度范围
+            if coord_sys in (4326, 4490):
+                if not lon or not lat or not (-180 <= lon <= 180 and -90 <= lat <= 90):
+                    i += 1
+                    list_exception.append(start)
+                    continue
 
             point = PointFeature(
                 name=str(item["name"]),
                 address=str(item["address"]),
                 userid=int(userid),
-                coord_sys=4326,
-                geom=f"SRID=4326;POINT({lon} {lat})"
+                coord_sys=coord_sys,
+                geom=f"SRID={coord_sys};POINT({lon} {lat})"
             )
+
             db.add(point)
 
         await db.commit()
-        return {"success": True, "imported": len(data_list),"skipped":i,"Abnormal location":list_exception}
+        return {"success": True, "imported": len(data_list), "skipped": i, "Abnormal location": list_exception}
 
     except Exception as e:
         await db.rollback()
@@ -251,14 +337,12 @@ async def import_file_point(db: AsyncSession, file: UploadFile, userid: int):
 
 async def import_file_linestring(db: AsyncSession, file: UploadFile, userid: int):
     """导入Excel文件数据"""
-    # 检查文件类型,endswith判断一个字符串结尾,多个参数必须填元组
     filename = file.filename.lower()
-    if not filename.endswith(('.xlsx', '.xls', 'csv')):
+    if not filename.endswith(('.xlsx', '.xls', '.csv')):
         raise ValueError("文件后缀为 .xlsx, .xls, .csv")
     contents = await file.read()
     try:
         if filename.endswith(('.xlsx', '.xls')):
-            # 读取文件内容
             df = pandas.read_excel(io.BytesIO(contents))
         else:
             df = pandas.read_csv(io.BytesIO(contents))
@@ -266,34 +350,37 @@ async def import_file_linestring(db: AsyncSession, file: UploadFile, userid: int
         # 检查必要列
         required_columns = ['name', 'address', "coordinates"]
         for col in required_columns:
-            if col not in df.columns:#获取这个 Excel 表格的 所有列名
+            if col not in df.columns:
                 raise ValueError(f"Excel 文件缺少必要列: {col}")
+
+        has_coord_sys = 'coord_sys' in df.columns
 
         # 转换数据
         data_list = df.to_dict(orient="records")
-        i=0
+        i = 0
         list_exception = []
         # 批量添加数据
-        for start,item in enumerate(data_list,start=1):
-            # 从 Excel 获取坐标字符串，例如：116.3,39.5;116.4,39.6
+        for start, item in enumerate(data_list, start=1):
             coords_str = item["coordinates"].strip()
             if not coords_str:
-                i+=1
+                i += 1
                 list_exception.append(start)
                 continue
 
-            # 创建线要素
+            coord_sys = int(item.get('coord_sys', 4326)) if has_coord_sys else 4326
+
             line = LinestringFeature(
                 name=str(item["name"]),
                 address=str(item["address"]),
                 userid=int(userid),
-                coord_sys=4326,
-                geom=f"SRID=4326;LINESTRING({coords_str})"
+                coord_sys=coord_sys,
+                geom=f"SRID={coord_sys};LINESTRING({coords_str})"
             )
+
             db.add(line)
 
         await db.commit()
-        return {"success": True, "imported": len(data_list),"skipped":i,"Abnormal location":list_exception}
+        return {"success": True, "imported": len(data_list), "skipped": i, "Abnormal location": list_exception}
 
     except Exception as e:
         await db.rollback()
@@ -301,51 +388,53 @@ async def import_file_linestring(db: AsyncSession, file: UploadFile, userid: int
 
 
 async def import_file_polygon(db: AsyncSession, file: UploadFile, userid: int):
+    """导入Excel文件数据"""
     filename = file.filename.lower()
-    if not filename.endswith(('.xlsx', '.xls', 'csv')):
+    if not filename.endswith(('.xlsx', '.xls', '.csv')):
         raise ValueError("文件后缀为 .xlsx, .xls, .csv")
     contents = await file.read()
     try:
         if filename.endswith(('.xlsx', '.xls')):
-            # 读取文件内容
             df = pandas.read_excel(io.BytesIO(contents))
         else:
             df = pandas.read_csv(io.BytesIO(contents))
         # 检查必要列
         required_columns = ['name', 'address', "coordinates"]
         for col in required_columns:
-            if col not in df.columns:#获取这个 Excel 表格的 所有列名
+            if col not in df.columns:
                 raise ValueError(f"Excel 文件缺少必要列: {col}")
+
+        has_coord_sys = 'coord_sys' in df.columns
 
         # 转换数据
         data_list = df.to_dict(orient="records")
         i = 0
         list_exception = []
         # 批量添加数据
-        for start,item in enumerate(data_list,start=1):
-            # 从 Excel 获取坐标
+        for start, item in enumerate(data_list, start=1):
             coords_str = item["coordinates"].strip()
-            #消除空格
             coord_list = coords_str.split(",")
             coord_list_strip = [c.strip() for c in coord_list]
 
             if not coords_str or coord_list_strip[0] != coord_list_strip[-1]:
-                i+= 1
+                i += 1
                 list_exception.append(start)
                 continue
 
-            # 3. 创建面模型
+            coord_sys = int(item.get('coord_sys', 4326)) if has_coord_sys else 4326
+
             polygon = PolygonFeature(
                 name=str(item["name"]),
                 address=str(item["address"]),
                 userid=int(userid),
-                coord_sys=4326,
-                geom=f"SRID=4326;POLYGON(({coords_str}))"
+                coord_sys=coord_sys,
+                geom=f"SRID={coord_sys};POLYGON(({coords_str}))"
             )
+
             db.add(polygon)
 
         await db.commit()
-        return {"success": True, "imported": len(data_list),"skipped":i,"Abnormal location":list_exception}
+        return {"success": True, "imported": len(data_list), "skipped": i, "Abnormal location": list_exception}
 
     except Exception as e:
         await db.rollback()

@@ -3,14 +3,7 @@ from sqlalchemy import select,func
 from models import PointFeature
 
 
-def _transform_geom(model, output_coord_sys):
-    """返回转换后的geom列"""
-    if output_coord_sys != 4326:
-        return func.ST_Transform(model.geom, output_coord_sys).label('geom')
-    return model.geom
-
-
-def _to_point(row, output_coord_sys):
+def _to_point(row):
     """将查询结果转为PointFeature对象"""
     point = PointFeature()
     for col in ['id', 'userid', 'name', 'address', 'coord_sys', 'create_time', 'update_time', 'geom']:
@@ -22,14 +15,11 @@ def _to_point(row, output_coord_sys):
 # 基础CRUD
 # ------------------------------
 async def create_point(db: AsyncSession,userid: int,point_data) -> PointFeature:
-    """创建点位，支持坐标系转换"""
+    """创建点位，geom 存储用户指定的坐标系，与 coord_sys 一致"""
     data = point_data.model_dump()
     coord_sys = data.pop('coord_sys', 4326)
 
-    if coord_sys != 4326:
-        data['geom'] = func.ST_Transform(
-            func.ST_SetSRID(func.ST_GeomFromText(data['geom']), coord_sys), 4326
-        )
+    data['geom'] = func.ST_SetSRID(func.ST_GeomFromText(data['geom']), coord_sys)
 
     add_point = PointFeature(**data, userid=userid, coord_sys=coord_sys)
     db.add(add_point)
@@ -38,9 +28,12 @@ async def create_point(db: AsyncSession,userid: int,point_data) -> PointFeature:
     return add_point
 
 
-async def get_point_by_id(db: AsyncSession, point_id: int,userid: int, output_coord_sys: int = 4326):
-    """根据ID查询点位"""
-    geom_col = _transform_geom(PointFeature, output_coord_sys)
+async def get_point_by_id(db: AsyncSession, point_id: int, userid: int, output_coord_sys: int = None):
+    """根据ID查询点位，output_coord_sys 为 None 时返回原始坐标"""
+    if output_coord_sys is not None:
+        geom_col = func.ST_Transform(PointFeature.geom, output_coord_sys).label('geom')
+    else:
+        geom_col = PointFeature.geom
     result = await db.execute(
         select(PointFeature.id, PointFeature.userid, PointFeature.name,
                PointFeature.address, PointFeature.coord_sys,
@@ -48,22 +41,21 @@ async def get_point_by_id(db: AsyncSession, point_id: int,userid: int, output_co
         .where(PointFeature.id == point_id, PointFeature.userid == userid)
     )
     row = result.one_or_none()
-    return _to_point(row, output_coord_sys) if row else None
+    return _to_point(row) if row else None
 
 
-async def get_all_points(db: AsyncSession,userid: int,page: int = 1, output_coord_sys: int = 4326):
-    """查询所有点位"""
+async def get_all_points(db: AsyncSession,userid: int,page: int = 1):
+    """查询所有点位（返回数据库原始坐标，不做坐标转换）"""
     skip = (page-1)*6
-    geom_col = _transform_geom(PointFeature, output_coord_sys)
 
     result_all = await db.execute(
         select(PointFeature.id, PointFeature.userid, PointFeature.name,
                PointFeature.address, PointFeature.coord_sys,
-               PointFeature.create_time, PointFeature.update_time, geom_col)
+               PointFeature.create_time, PointFeature.update_time, PointFeature.geom)
         .where(PointFeature.userid == userid)
         .order_by(PointFeature.id).offset(skip).limit(6)
     )
-    points = [_to_point(row, output_coord_sys) for row in result_all.all()]
+    points = [_to_point(row) for row in result_all.all()]
 
     result_count = await db.execute(select(func.count(PointFeature.id)).where(PointFeature.userid == userid))
     return points, result_count.scalar()

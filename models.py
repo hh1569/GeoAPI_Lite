@@ -41,9 +41,9 @@ class PointFeature(Base):
     address: Mapped[str | None] = mapped_column(String(255), comment="点位地址")
     coord_sys: Mapped[int] = mapped_column(Integer, default=4326, comment="输入坐标系SRID")
 
-    # GIS核心字段：POINT类型，4326坐标系（WGS84 GPS经纬度）
+    # GIS核心字段：POINT类型，坐标系由 coord_sys 字段决定
     geom: Mapped[Geometry] = mapped_column(
-        Geometry(geometry_type="POINT", srid=4326),
+        Geometry(geometry_type="POINT"),
         nullable=False,
         comment="空间几何点位"
     )
@@ -119,7 +119,7 @@ class LinestringFeature(Base):
     coord_sys: Mapped[int] = mapped_column(Integer, default=4326, comment="输入坐标系SRID")
 
     geom: Mapped[Geometry] = mapped_column(
-        Geometry(geometry_type="LINESTRING", srid=4326),
+        Geometry(geometry_type="LINESTRING"),
         nullable=False,
         comment="空间几何线位"
     )
@@ -184,7 +184,7 @@ class PolygonFeature(Base):
     coord_sys: Mapped[int] = mapped_column(Integer, default=4326, comment="输入坐标系SRID")
 
     geom: Mapped[Geometry] = mapped_column(
-        Geometry(geometry_type="POLYGON", srid=4326),
+        Geometry(geometry_type="POLYGON"),
         nullable=False,
         comment="空间几何面"
     )
