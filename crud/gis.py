@@ -618,3 +618,115 @@ def coords_to_wkt(geom_type: str, coords) -> str:
 
     raise ValueError(f"不支持的几何类型: {geom_type}")
 
+
+async def import_shapefile(db: AsyncSession, file: UploadFile, userid: int, coord_sys: int = 4326):
+    """
+    从 Shapefile (.zip) 导入要素。
+    zip 内需包含 .shp / .shx / .dbf，自动识别点/线/面。
+    """
+    import tempfile
+    import zipfile
+    import os
+    import shapefile
+
+    filename = file.filename.lower()
+    if not filename.endswith('.zip'):
+        raise ValueError("Shapefile 需打包为 .zip 上传，内包含 .shp / .shx / .dbf")
+
+    contents = await file.read()
+
+    # 解压到临时目录
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+        with zipfile.ZipFile(io.BytesIO(contents)) as zf:
+            zf.extractall(tmpdir)
+
+        # 找 .shp 文件
+        shp_files = [f for f in os.listdir(tmpdir) if f.lower().endswith('.shp')]
+        if not shp_files:
+            raise ValueError("zip 中未找到 .shp 文件")
+        shp_path = os.path.join(tmpdir, shp_files[0])
+
+        sf = shapefile.Reader(shp_path)
+
+        geom_type_map = {
+            shapefile.POINT:        ("Point", PointFeature),
+            shapefile.POINTZ:       ("Point", PointFeature),
+            shapefile.POINTM:       ("Point", PointFeature),
+            shapefile.MULTIPOINT:   ("MultiPoint", PointFeature),
+            shapefile.MULTIPOINTZ:  ("MultiPoint", PointFeature),
+            shapefile.MULTIPOINTM:  ("MultiPoint", PointFeature),
+            shapefile.POLYLINE:     ("LineString", LinestringFeature),
+            shapefile.POLYLINEZ:    ("LineString", LinestringFeature),
+            shapefile.POLYLINEM:    ("LineString", LinestringFeature),
+            shapefile.POLYGON:      ("Polygon", PolygonFeature),
+            shapefile.POLYGONZ:     ("Polygon", PolygonFeature),
+            shapefile.POLYGONM:     ("Polygon", PolygonFeature),
+        }
+
+        imported = 0
+        skipped = 0
+        field_names = [f[0] for f in sf.fields[1:]]  # 跳过 DeletionFlag
+
+        for sr in sf.iterShapeRecords():
+            shape_type = sr.shape.shapeType
+            mapping = geom_type_map.get(shape_type)
+            if not mapping:
+                skipped += 1
+                continue
+
+            wkt_type, model = mapping
+            wkt = shape_to_wkt(wkt_type, sr.shape)
+
+            record = dict(zip(field_names, sr.record))
+            name = str(record.get("name", record.get("NAME", record.get("Name", f"导入要素_{imported + 1}"))))
+            address = str(record.get("address", record.get("address", record.get("ADDRESS", ""))))
+
+            obj = model(
+                name=name,
+                address=address if address else None,
+                userid=userid,
+                coord_sys=coord_sys,
+                geom=f"SRID={coord_sys};{wkt}",
+            )
+            db.add(obj)
+            imported += 1
+
+        await db.commit()
+
+    return {"success": True, "imported": imported, "skipped": skipped}
+
+
+def shape_to_wkt(wkt_type: str, shape) -> str:
+    """将 pyshp Shape 对象转为 WKT 字符串"""
+    pts = shape.points
+
+    if wkt_type in ("Point",):
+        return f"POINT({pts[0][0]} {pts[0][1]})"
+
+    if wkt_type in ("MultiPoint",):
+        coords = ", ".join(f"{p[0]} {p[1]}" for p in pts)
+        return f"MULTIPOINT({coords})"
+
+    if wkt_type in ("LineString",):
+        # pyshp: parts 列表标记每条线的起始点索引
+        lines = []
+        parts = list(shape.parts) + [len(pts)]
+        for i in range(len(parts) - 1):
+            segment = pts[parts[i]:parts[i + 1]]
+            lines.append("(" + ", ".join(f"{p[0]} {p[1]}" for p in segment) + ")")
+        if len(lines) == 1:
+            return f"LINESTRING({lines[0][1:-1]})"
+        return f"MULTILINESTRING({', '.join(lines)})"
+
+    if wkt_type in ("Polygon",):
+        rings = []
+        parts = list(shape.parts) + [len(pts)]
+        for i in range(len(parts) - 1):
+            ring = pts[parts[i]:parts[i + 1]]
+            rings.append("(" + ", ".join(f"{p[0]} {p[1]}" for p in ring) + ")")
+        if len(rings) == 1:
+            return f"POLYGON({rings[0]})"
+        return f"MULTIPOLYGON(({'), ('.join(rings)}))"
+
+    raise ValueError(f"不支持的 WKT 类型: {wkt_type}")
+

@@ -414,6 +414,23 @@ async def import_(
         raise HTTPException(status_code=400,detail=str(e))
 
 
+@router_gis.post("/batch/import-shapefile", summary="从 Shapefile (.zip) 导入要素（自动识别点/线/面）")
+async def import_shapefile(
+    file: UploadFile,
+    coord_sys: int = Query(default=4326, description="坐标系SRID，默认4326(WGS84)"),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(current_user),
+):
+    """上传 .zip 格式 Shapefile（内含 .shp/.shx/.dbf），自动识别几何类型导入"""
+    if not file:
+        raise HTTPException(status_code=400, detail="文件为空")
+    try:
+        result = await gis.import_shapefile(db=db, file=file, userid=user.userid, coord_sys=coord_sys)
+        return {"message": result}
+    except (TypeError, ValueError) as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @router_gis.post("/batch/import-geojson", summary="从 GeoJSON 文件导入要素（自动识别点/线/面）")
 async def import_geojson(
     file: UploadFile,
@@ -443,16 +460,87 @@ async def get_summary(
     return await gis.get_summary(db=db, userid=user.userid)
 
 
-@router_gis.get("/export", summary="导出要素数据（GeoJSON / Excel / CSV）")
+def _build_shapefile_zip(features, layer_name: str) -> bytes:
+    """将要素列表打包为 Shapefile zip（.shp/.shx/.dbf），返回字节"""
+    import tempfile
+    import zipfile
+    import os
+    import shapefile
+
+    geom_type_map = {
+        "Point": shapefile.POINT, "MultiPoint": shapefile.MULTIPOINT,
+        "LineString": shapefile.POLYLINE, "MultiLineString": shapefile.POLYLINE,
+        "Polygon": shapefile.POLYGON, "MultiPolygon": shapefile.POLYGON,
+    }
+
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+        base = os.path.join(tmpdir, layer_name)
+
+        # 确定 shapefile 类型
+        first_geom = to_shape(features[0].geom)
+        first_type = first_geom.geom_type
+        sf_type = geom_type_map.get(first_type, shapefile.POINT)
+
+        w = shapefile.Writer(base, shapeType=sf_type)
+        w.field("id", "N", 10)
+        w.field("name", "C", "100")
+        w.field("address", "C", "255")
+        w.field("coord_sys", "N", 10)
+        w.field("create_tm", "C", "30")
+        w.field("update_tm", "C", "30")
+
+        for f in features:
+            g = to_shape(f.geom)
+            gt = g.geom_type
+
+            if gt in ("Point",):
+                w.point(g.x, g.y)
+            elif gt in ("MultiPoint",):
+                pts = [(p[0], p[1]) for p in g.coords]
+                w.multipoint(pts)
+            elif gt in ("LineString",):
+                w.line([list(g.coords)])
+            elif gt in ("MultiLineString",):
+                w.line([list(line.coords) for line in g.geoms])
+            elif gt in ("Polygon",):
+                w.poly([list(g.exterior.coords)])
+            elif gt in ("MultiPolygon",):
+                parts = [list(p.exterior.coords) for p in g.geoms]
+                # shapefile format: outer ring of first polygon + potentially inner rings
+                w.poly(parts)
+
+            w.record(
+                f.id,
+                f.name or "",
+                f.address or "",
+                f.coord_sys,
+                f.create_time.isoformat() if f.create_time else "",
+                f.update_time.isoformat() if f.update_time else "",
+            )
+
+        w.close()
+
+        # 打包所有相关文件
+        bio = io.BytesIO()
+        with zipfile.ZipFile(bio, "w", zipfile.ZIP_DEFLATED) as zf:
+            for ext in (".shp", ".shx", ".dbf", ".prj"):
+                path = base + ext
+                if os.path.exists(path):
+                    zf.write(path, layer_name + ext)
+        bio.seek(0)
+        return bio.getvalue()
+
+
+@router_gis.get("/export", summary="导出要素数据（Shapefile / GeoJSON / Excel / CSV）")
 async def export_features(
     layer: LayerName = Query(..., description="图层类型：point、line、polygon"),
-    fmt: str = Query("geojson", alias="format", description="导出格式：geojson、xlsx、csv"),
+    fmt: str = Query("geojson", alias="format", description="导出格式：shapefile、geojson、xlsx、csv"),
     output_coord_sys: int = Query(default=None, description="输出坐标系SRID，不传则返回原始坐标"),
     feature_ids: str = Query(default=None, description="指定要素ID，多个用逗号分隔，不传则导出全部"),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(current_user),
 ):
-    """导出当前用户指定图层的要素数据，支持 GeoJSON / Excel / CSV 三种格式"""
+    """导出当前用户指定图层的要素数据，支持 Shapefile / GeoJSON / Excel / CSV 四种格式"""
     model = LAYER_MODEL_MAP[layer]
 
     if output_coord_sys is not None and not await validate_srid(db, output_coord_sys):
@@ -512,8 +600,12 @@ async def export_features(
         content = bio.getvalue()
         media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         filename = f"{layer_name}_export.xlsx"
+    elif fmt == "shapefile":
+        content = _build_shapefile_zip(features, layer_name)
+        media_type = "application/zip"
+        filename = f"{layer_name}_export.zip"
     else:
-        raise HTTPException(status_code=400, detail=f"不支持的格式：{fmt}，仅支持 geojson、xlsx、csv")
+        raise HTTPException(status_code=400, detail=f"不支持的格式：{fmt}，仅支持 shapefile、geojson、xlsx、csv")
 
     return Response(
         content=content,
