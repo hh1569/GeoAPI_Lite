@@ -10,10 +10,5 @@ def get_hashed_password(password: str):
     return paw_context.hash(password)
 
 ##验证明文和密文
-def verify_password(plain_password, hashed_password):
+def verify_password(plain_password: str, hashed_password: str) -> bool:
     return paw_context.verify(plain_password, hashed_password)
-
-if __name__ == "__main__":
-    jj = get_hashed_password('dsadad')
-    print(jj)
-    print(verify_password('dsadad', jj))

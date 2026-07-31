@@ -10,8 +10,8 @@ from utils.mapping_table import CoordSys
 #数据校验数值错误时，无法进入判断，只会抛异常
 class PolygonCreate(BaseModel):
     """创建面位入参"""
-    name: str = Field(min_length=1, max_length=100, description="线位名称")
-    address: str | None = Field(None, max_length=255, description="线位地址")
+    name: str = Field(min_length=1, max_length=100, description="面位名称")
+    address: str | None = Field(None, max_length=255, description="面位地址")
     geom: str = Field(
         pattern=r"^POLYGON\(\(\d+\.?\d* \d+\.?\d*(?:, \d+\.?\d* \d+\.?\d*)+\)\)$",
         description="WKT格式面要素，例：POLYGON((120 30, 121 30, 121 31, 120 30))",
@@ -73,8 +73,8 @@ class PolygonCreate(BaseModel):
 
 class PolygonUpdate(BaseModel):
     """更新面位入参"""
-    name: str | None = Field(None, min_length=1, max_length=100, description="点位名称")
-    address: str | None = Field(None, max_length=255, description="点位地址")
+    name: str | None = Field(None, min_length=1, max_length=100, description="面位名称")
+    address: str | None = Field(None, max_length=255, description="面位地址")
     geom: str | None = Field(
         None,
         pattern=r"^POLYGON\(\(\d+\.?\d* \d+\.?\d*(?:, \d+\.?\d* \d+\.?\d*)+\)\)$",
@@ -130,8 +130,6 @@ class PolygonUpdate(BaseModel):
                     )
 
         return values
-
-    # model_config = ConfigDict(from_attributes=True)
 
 
 class Geometry(BaseModel):

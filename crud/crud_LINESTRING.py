@@ -80,29 +80,3 @@ async def delete_linestring(db: AsyncSession, linestring_id: int,userid: int) ->
     await db.commit()
     return True
 
-
-
-async def get_linestring_length(db: AsyncSession,linestring_id: int,userid: int):
-    """_______"""
-    result = await db.execute(select(LinestringFeature.geom).
-    where(LinestringFeature.id == linestring_id,LinestringFeature.userid == userid))
-    geom = result.scalar_one_or_none()
-    if not geom:
-        return None
-    linestring = to_shape(geom)
-    lin_length = linestring.length
-    # geojson = length.__geo_interface__   #geojson
-    return lin_length
-
-
-
-
-
-
-
-
-
-
-
-
-

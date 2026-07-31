@@ -29,17 +29,6 @@ async def create_token(db: AsyncSession, user_id: int):
 
 
 
-async def authenticate_user_(db: AsyncSession, userid: int, password: str):
-    """验证密码"""
-
-    user = await get_user_userid(db, userid)
-    if not user:
-        return None
-    if not encryption.verify_password(password, user.password):
-        return None
-
-    return user
-
 async def authenticate_user(db: AsyncSession, account: str | int, password: str):
     """
     验证密码（支持 用户名 / 用户ID 两种方式登录）

@@ -1,6 +1,10 @@
+import io
+import json
+
+import pandas
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
-from shapely.geometry import mapping
-from sqlalchemy.dialects.mysql import insert
+from fastapi.responses import Response
+from geoalchemy2.shape import to_shape
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette import status
 
@@ -408,5 +412,93 @@ async def import_(
             raise HTTPException(status_code=400,detail=f"导入类型不支持：{type_}，仅支持：point、line、polygon")
     except (TypeError, ValueError) as e:
         raise HTTPException(status_code=400,detail=str(e))
+
+
+@router_gis.get("/summary", summary="数据统计 — 各图层要素数量")
+async def get_summary(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(current_user),
+):
+    """返回当前用户的点位、线、面要素数量及总数"""
+    return await gis.get_summary(db=db, userid=user.userid)
+
+
+@router_gis.get("/export", summary="导出要素数据（GeoJSON / Excel / CSV）")
+async def export_features(
+    layer: LayerName = Query(..., description="图层类型：point、line、polygon"),
+    fmt: str = Query("geojson", alias="format", description="导出格式：geojson、xlsx、csv"),
+    output_coord_sys: int = Query(default=None, description="输出坐标系SRID，不传则返回原始坐标"),
+    feature_ids: str = Query(default=None, description="指定要素ID，多个用逗号分隔，不传则导出全部"),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(current_user),
+):
+    """导出当前用户指定图层的要素数据，支持 GeoJSON / Excel / CSV 三种格式"""
+    model = LAYER_MODEL_MAP[layer]
+
+    if output_coord_sys is not None and not await validate_srid(db, output_coord_sys):
+        raise HTTPException(status_code=400, detail=f"坐标系 SRID {output_coord_sys} 不存在")
+
+    ids = [int(i.strip()) for i in feature_ids.split(",")] if feature_ids else None
+
+    features = await gis.export_features(
+        db=db, model=model, userid=user.userid,
+        target_srid=output_coord_sys, feature_ids=ids,
+    )
+
+    if not features:
+        raise HTTPException(status_code=404, detail="没有可导出的数据")
+
+    # 获取图层名称用于文件名
+    layer_name_map = {LayerName.point: "point", LayerName.line: "linestring", LayerName.polygon: "polygon"}
+    layer_name = layer_name_map[layer]
+
+    if fmt == "geojson":
+        fc = to_feature_collection(features)
+        content = json.dumps(fc, ensure_ascii=False, indent=2).encode("utf-8")
+        return Response(
+            content=content,
+            media_type="application/geo+json",
+            headers={"Content-Disposition": f'attachment; filename="{layer_name}_export.geojson"'}
+        )
+
+    # Excel / CSV: 构建统一的 DataFrame
+    rows = []
+    for f in features:
+        geom_shapely = to_shape(f.geom)
+        row = {
+            "id": f.id,
+            "name": f.name,
+            "address": f.address,
+            "coord_sys": f.coord_sys,
+            "create_time": f.create_time.isoformat() if f.create_time else None,
+            "update_time": f.update_time.isoformat() if f.update_time else None,
+            "geom_wkt": geom_shapely.wkt,
+        }
+        if hasattr(geom_shapely, 'x') and hasattr(geom_shapely, 'y'):
+            row["lon"] = geom_shapely.x
+            row["lat"] = geom_shapely.y
+        rows.append(row)
+
+    df = pandas.DataFrame(rows)
+
+    if fmt == "csv":
+        content = df.to_csv(index=False).encode("utf-8-sig")
+        media_type = "text/csv"
+        filename = f"{layer_name}_export.csv"
+    elif fmt == "xlsx":
+        bio = io.BytesIO()
+        with pandas.ExcelWriter(bio, engine="openpyxl") as writer:
+            df.to_excel(writer, index=False, sheet_name=layer_name)
+        content = bio.getvalue()
+        media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        filename = f"{layer_name}_export.xlsx"
+    else:
+        raise HTTPException(status_code=400, detail=f"不支持的格式：{fmt}，仅支持 geojson、xlsx、csv")
+
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+    )
 
 

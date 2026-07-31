@@ -24,4 +24,3 @@ class Settings(BaseSettings):
 
 # 全局配置实例
 settings = Settings()
-print(settings.ASYNC_DATABASE_URI)

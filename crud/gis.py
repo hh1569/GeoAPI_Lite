@@ -7,13 +7,35 @@ from sqlalchemy import select, func
 
 from models import LinestringFeature, PolygonFeature, PointFeature
 from crud import crud_LINESTRING, crud_POLYGON
+import pandas
+import io
 
-async def test():
-    pass
+# ------------------------------
+# 数据统计
+# ------------------------------
+
+async def get_summary(db: AsyncSession, userid: int) -> dict:
+    """统计当前用户各图层要素数量"""
+    models = {
+        "point": PointFeature,
+        "linestring": LinestringFeature,
+        "polygon": PolygonFeature,
+    }
+    result = {}
+    total = 0
+    for key, model in models.items():
+        count_result = await db.execute(
+            select(func.count(model.id)).where(model.userid == userid)
+        )
+        count = count_result.scalar()
+        result[key] = count
+        total += count
+    result["total"] = total
+    return result
 
 
 # ------------------------------
-# 坐标转换
+# 导出
 # ------------------------------
 async def validate_srid(db: AsyncSession, srid: int) -> bool:
     """
@@ -279,6 +301,45 @@ async def get_polygon_area(db: AsyncSession, polygon_id: int,userid: int):
 from models import PointFeature
 import pandas
 import io
+
+async def export_features(
+    db: AsyncSession,
+    model,
+    userid: int,
+    target_srid: int = None,
+    feature_ids: list[int] = None,
+):
+    """
+    导出要素数据，无分页，支持坐标系转换。
+    返回 model 对象列表，可直接调用 to_geojson_feature()。
+    """
+    if target_srid is not None:
+        geom_col = func.ST_Transform(model.geom, target_srid).label('geom')
+    else:
+        geom_col = model.geom
+
+    stmt = select(
+        model.id, model.userid, model.name, model.address,
+        model.coord_sys, model.create_time, model.update_time, geom_col
+    ).where(model.userid == userid)
+
+    if feature_ids:
+        stmt = stmt.where(model.id.in_(feature_ids))
+
+    stmt = stmt.order_by(model.id)
+
+    result = await db.execute(stmt)
+    rows = result.all()
+
+    features = []
+    for row in rows:
+        obj = model()
+        for col in ['id', 'userid', 'name', 'address', 'coord_sys', 'create_time', 'update_time', 'geom']:
+            setattr(obj, col, getattr(row, col))
+        features.append(obj)
+
+    return features
+
 
 async def import_file_point(db: AsyncSession, file: UploadFile, userid: int):
     """导入Excel文件数据"""

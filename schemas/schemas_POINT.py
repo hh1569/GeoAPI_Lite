@@ -1,9 +1,7 @@
 from typing import Any
 
-import shapely
 from fastapi import HTTPException
 from pydantic import BaseModel, Field, ConfigDict, model_validator
-from datetime import datetime
 from shapely.wkt import loads
 from starlette import status
 
@@ -68,9 +66,6 @@ class PointCreate(BaseModel):
         return values
 
 
-
-    # model_config = ConfigDict(from_attributes=True)
-
 class PointUpdate(BaseModel):
     """更新点位入参"""
     name: str | None = Field(None, min_length=1, max_length=100, description="点位名称")
@@ -122,12 +117,6 @@ class PointUpdate(BaseModel):
 
         return values
 
-    # model_config = ConfigDict(from_attributes=True)
-
-
-# ------------------------------
-# 出参模型
-# ------------------------------
 
 class Geometry(BaseModel):
     type: str

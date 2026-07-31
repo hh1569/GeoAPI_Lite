@@ -1,12 +1,9 @@
-from datetime import datetime
 from typing import Any
 
 from fastapi import HTTPException
 from pydantic import BaseModel, Field, ConfigDict, model_validator
 from starlette import status
-# 2. 解析 WKT,WKB → 支持 点、线、面，将wkt，wkb转换为shape
 from shapely.wkt import loads
-# from shapely.wkb import loads
 
 from utils.mapping_table import CoordSys
 
@@ -71,8 +68,8 @@ class LinestringCreate(BaseModel):
 
 class LinestringUpdate(BaseModel):
     """更新线入参"""
-    name: str | None = Field(None, min_length=1, max_length=100, description="点位名称")
-    address: str | None = Field(None, max_length=255, description="点位地址")
+    name: str | None = Field(None, min_length=1, max_length=100, description="线位名称")
+    address: str | None = Field(None, max_length=255, description="线位地址")
     geom: str | None = Field(
         None,
         pattern=r"^LINESTRING\(\d+\.?\d* \d+\.?\d*(?:, \d+\.?\d* \d+\.?\d*)+\)$",

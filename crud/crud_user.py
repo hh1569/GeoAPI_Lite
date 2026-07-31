@@ -57,8 +57,7 @@ async def update_password(db: AsyncSession, user: User, old_password: str, new_p
     hashed_password = encryption.get_hashed_password(new_password)
     user.password = hashed_password
     db.add(user)
-    a = encryption.verify_password(plain_password=new_password, hashed_password=hashed_password)
     await db.commit()
     await db.refresh(user)
-    return a
+    return True
 

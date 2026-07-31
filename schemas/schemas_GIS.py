@@ -30,7 +30,6 @@ class NearbyQuery(BaseModel):
 
         return values
 
-    # model_config = ConfigDict(from_attributes=True)
 
 class BboxQuery(BaseModel):
     """矩形范围查询入参"""
