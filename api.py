@@ -414,6 +414,26 @@ async def import_(
         raise HTTPException(status_code=400,detail=str(e))
 
 
+@router_gis.post("/batch/import-geojson", summary="从 GeoJSON 文件导入要素（自动识别点/线/面）")
+async def import_geojson(
+    file: UploadFile,
+    coord_sys: int = Query(default=4326, description="坐标系SRID，默认4326(WGS84)"),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(current_user),
+):
+    """
+    上传 GeoJSON 文件，自动识别 Feature 中的几何类型（Point/LineString/Polygon），
+    批量导入到对应的点位/线/面表中。支持 FeatureCollection 和单条 Feature。
+    """
+    if not file:
+        raise HTTPException(status_code=400, detail="文件为空")
+    try:
+        result = await gis.import_geojson(db=db, file=file, userid=user.userid, coord_sys=coord_sys)
+        return {"message": result}
+    except (TypeError, ValueError) as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @router_gis.get("/summary", summary="数据统计 — 各图层要素数量")
 async def get_summary(
     db: AsyncSession = Depends(get_db),

@@ -502,13 +502,119 @@ async def import_file_polygon(db: AsyncSession, file: UploadFile, userid: int):
         raise ValueError(f"导入失败: {str(e)}")
 
 
+async def import_geojson(db: AsyncSession, file: UploadFile, userid: int, coord_sys: int = 4326):
+    """
+    从 GeoJSON 文件导入要素，自动识别 Point / LineString / Polygon。
+    支持 FeatureCollection 和单条 Feature。
+    """
+    import json
+
+    filename = file.filename.lower()
+    if not filename.endswith(('.geojson', '.json')):
+        raise ValueError("文件后缀需为 .geojson 或 .json")
+
+    contents = await file.read()
+    try:
+        data = json.loads(contents.decode("utf-8"))
+    except json.JSONDecodeError:
+        raise ValueError("文件不是有效的 JSON/GeoJSON 格式")
+
+    # 统一转为 features 列表
+    if data.get("type") == "FeatureCollection":
+        features = data.get("features", [])
+    elif data.get("type") == "Feature":
+        features = [data]
+    else:
+        raise ValueError("GeoJSON 格式不正确，需要 FeatureCollection 或 Feature")
+
+    if not features:
+        raise ValueError("GeoJSON 文件中没有要素")
+
+    geom_type_map = {
+        "Point": PointFeature,
+        "MultiPoint": PointFeature,
+        "LineString": LinestringFeature,
+        "MultiLineString": LinestringFeature,
+        "Polygon": PolygonFeature,
+        "MultiPolygon": PolygonFeature,
+    }
+
+    imported = 0
+    skipped = 0
+    for i, feature in enumerate(features, start=1):
+        geometry = feature.get("geometry")
+        if not geometry:
+            skipped += 1
+            continue
+
+        geom_type = geometry.get("type")
+        coords = geometry.get("coordinates")
+        if not geom_type or not coords:
+            skipped += 1
+            continue
+
+        model = geom_type_map.get(geom_type)
+        if not model:
+            skipped += 1
+            continue
+
+        props = feature.get("properties", {}) or {}
+        name = str(props.get("name", f"导入要素_{i}"))
+        address = str(props.get("address") or "")
+
+        # 坐标 → WKT
+        wkt = coords_to_wkt(geom_type, coords)
+
+        obj = model(
+            name=name,
+            address=address if address else None,
+            userid=userid,
+            coord_sys=coord_sys,
+            geom=f"SRID={coord_sys};{wkt}",
+        )
+        db.add(obj)
+        imported += 1
+
+    await db.commit()
+    return {"success": True, "imported": imported, "skipped": skipped}
 
 
+def coords_to_wkt(geom_type: str, coords) -> str:
+    """将 GeoJSON 坐标数组转为 WKT 字符串"""
+    if geom_type == "Point":
+        return f"POINT({coords[0]} {coords[1]})"
 
+    if geom_type == "MultiPoint":
+        pts = ", ".join(f"{c[0]} {c[1]}" for c in coords)
+        return f"MULTIPOINT({pts})"
 
+    if geom_type == "LineString":
+        pts = ", ".join(f"{c[0]} {c[1]}" for c in coords)
+        return f"LINESTRING({pts})"
 
+    if geom_type == "MultiLineString":
+        lines = ", ".join(
+            "(" + ", ".join(f"{c[0]} {c[1]}" for c in line) + ")"
+            for line in coords
+        )
+        return f"MULTILINESTRING({lines})"
 
+    if geom_type == "Polygon":
+        rings = ", ".join(
+            "(" + ", ".join(f"{c[0]} {c[1]}" for c in ring) + ")"
+            for ring in coords
+        )
+        return f"POLYGON({rings})"
 
+    if geom_type == "MultiPolygon":
+        polys = ", ".join(
+            "(" + ", ".join(
+                "(" + ", ".join(f"{c[0]} {c[1]}" for c in ring) + ")"
+                for ring in poly
+            ) + ")"
+            for poly in coords
+        )
+        return f"MULTIPOLYGON({polys})"
 
-
+    raise ValueError(f"不支持的几何类型: {geom_type}")
 
