@@ -117,6 +117,18 @@ Authorization: Bearer <token>
 
 支持 GeoJSON、CSV、Excel 三种格式，可指定要素 ID 和输出坐标系。
 
+### 6. 导入 GeoJSON
+
+```http
+POST /api/gis/batch/import-geojson?coord_sys=4326
+Authorization: Bearer <token>
+Content-Type: multipart/form-data
+
+file: data.geojson
+```
+
+自动识别 Feature 中的几何类型（Point/LineString/Polygon），批量导入到对应表中。支持 FeatureCollection 和单条 Feature。
+
 ---
 
 ## API 完整列表
@@ -175,6 +187,7 @@ Authorization: Bearer <token>
 | GET | `/api/gis/{polygon_id}/area` | 计算面积 | 是 |
 | GET | `/api/gis/export` | 导出数据（GeoJSON/CSV/Excel） | 是 |
 | POST | `/api/gis/batch/import-excel` | 从 Excel 批量导入 | 是 |
+| POST | `/api/gis/batch/import-geojson` | 从 GeoJSON 导入（自动识别点/线/面） | 是 |
 
 ---
 
@@ -206,7 +219,7 @@ GeoAPI/
 │   ├── crud_POLYGON.py
 │   ├── crud_user.py      # 用户操作
 │   ├── crud_token.py     # Token 管理
-│   └── gis.py            # 空间查询、导入导出、统计
+│   └── gis.py            # 空间查询、导入导出（Excel/GeoJSON）、统计
 ├── schemas/
 │   ├── schemas_POINT.py  # 点位请求/响应模型
 │   ├── schemas_LINESTRING.py
