@@ -5,6 +5,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 class Settings(BaseSettings):
+    # 高德开放平台 Web 服务 Key
+    AMAP_KEY: str = ""
+
     # 数据库配置
     DB_HOST: str
     DB_PORT: int

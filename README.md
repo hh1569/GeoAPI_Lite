@@ -189,6 +189,31 @@ file: data.geojson
 | POST | `/api/gis/batch/import-excel` | 从 Excel 批量导入 | 是 |
 | POST | `/api/gis/batch/import-geojson` | 从 GeoJSON 导入（自动识别点/线/面） | 是 |
 
+### 高德服务 `/api/amap`（需在 `.env` 配置 `AMAP_KEY`）
+
+> 把高德开放平台能力包装成项目自己的接口：点线面数据一站式查询 + 入库。
+> 所有返回坐标已自动从高德火星坐标（GCJ-02）转换为 WGS84(4326)，与项目坐标系一致。
+
+| 方法 | 路径 | 说明 | 认证 |
+|------|------|------|------|
+| GET | `/api/amap/search` | POI 搜索（按类型码/关键词，如 1412=学校、060100=餐饮） | 是 |
+| POST | `/api/amap/search_import` | POI 搜索并导入点表（同名自动跳过） | 是 |
+| GET | `/api/amap/geocode` | 地理编码：地址 → 经纬度 | 是 |
+| GET | `/api/amap/regeo` | 逆地理编码：经纬度 → 地址 | 是 |
+| GET | `/api/amap/district` | 行政区划查询（面）：返回边界多边形 WKT | 是 |
+| POST | `/api/amap/district_import` | 行政区划边界导入面表 | 是 |
+| GET | `/api/amap/route` | 驾车路径规划（线）：返回路线 LINESTRING WKT | 是 |
+| POST | `/api/amap/route_import` | 路径规划导入线表 | 是 |
+
+常用 POI 类型码：`1412`=学校、`060100`=餐饮、`080300`=医院、`050000`=风景名胜、`010000`=汽车服务。
+城市参数建议使用 adcode（如 `520400`=安顺市、`520100`=贵阳市），比中文城市名更稳定。
+
+高德开放平台注册获取 Key：[lbs.amap.com](https://lbs.amap.com)，创建应用时平台类型选择 **Web服务**，将 Key 填入 `.env`：
+
+```
+AMAP_KEY=你的Web服务Key
+```
+
 ---
 
 ## 坐标系支持

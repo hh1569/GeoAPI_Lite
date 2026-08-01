@@ -3,6 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware  # 导入 CORS 中间件
 from database import create_tables
 from api import router_point,router_linestring,router_polygon,router_gis,router_user
+from api_amap import router_amap
 
 # 应用生命周期管理
 @asynccontextmanager
@@ -37,6 +38,7 @@ app.include_router(router_point)
 app.include_router(router_linestring)
 app.include_router(router_polygon)
 app.include_router(router_gis)
+app.include_router(router_amap)
 
 # 健康检查接口
 @app.get("/", summary="健康检查")

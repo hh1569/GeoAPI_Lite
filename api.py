@@ -483,11 +483,11 @@ def _build_shapefile_zip(features, layer_name: str) -> bytes:
 
         w = shapefile.Writer(base, shapeType=sf_type)
         w.field("id", "N", 10)
-        w.field("name", "C", "100")
-        w.field("address", "C", "255")
+        w.field("name", "C", 100)
+        w.field("address", "C", 255)
         w.field("coord_sys", "N", 10)
-        w.field("create_tm", "C", "30")
-        w.field("update_tm", "C", "30")
+        w.field("create_tm", "C", 30)
+        w.field("update_tm", "C", 30)
 
         for f in features:
             g = to_shape(f.geom)
