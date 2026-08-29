@@ -138,7 +138,7 @@ class PointDetail(BaseModel):
     properties: Properties
 
     model_config = ConfigDict(
-        from_attributes=True,  # 允许从ORM对象属性取值
+        from_attributes=True,  # 允许从ORM对象属性取值，校验规则和上面写的字典大致一样。（原理不懂）
     )
 
 

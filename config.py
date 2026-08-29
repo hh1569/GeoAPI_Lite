@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 # 加载.env文件
 load_dotenv()
 
-class Settings(BaseSettings):
+class Settings(BaseSettings):#Pydantic 会自动从环境变量读取字段值
     # 高德开放平台 Web 服务 Key
     AMAP_KEY: str = ""
 

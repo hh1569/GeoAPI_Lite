@@ -239,9 +239,7 @@ GeoAPI/
 ├── config.py             # 环境变量配置
 ├── requirements.txt      # Python 依赖
 ├── crud/
-│   ├── crud_POINT.py     # 点位数据库操作
-│   ├── crud_LINESTRING.py
-│   ├── crud_POLYGON.py
+│   ├── crud_any.py       # 通用CRUD（点/线/面共用：create/get_by_id/get_all/update_lay/delete_lay）
 │   ├── crud_user.py      # 用户操作
 │   ├── crud_token.py     # Token 管理
 │   └── gis.py            # 空间查询、导入导出（Excel/GeoJSON）、统计

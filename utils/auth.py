@@ -7,13 +7,17 @@ import models
 from database import get_db
 from crud.crud_token import get_user_by_token
 
-
-security = HTTPBearer()
+#HTTPBearer类__call__
+security = HTTPBearer()#取 Bearer token 的依赖工具
 
 async def current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: AsyncSession = Depends(get_db),
 ) -> models.User:
+# class HTTPAuthorizationCredentials:
+    # scheme: str  # 认证方案，如 "Bearer"
+    # credentials: str  # 凭证内容，即 token 字符串
+
     """
     从 Authorization: Bearer <token> 请求头中提取并验证用户身份。
     """

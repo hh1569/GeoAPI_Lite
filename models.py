@@ -3,8 +3,9 @@ from typing import Optional
 
 from geoalchemy2.shape import to_shape
 from sqlalchemy.orm import Mapped, mapped_column
-from sqlalchemy import String, Index, Integer, ForeignKey, DateTime
+from sqlalchemy import String, Index, Integer, ForeignKey, DateTime ,Text ,TEXT
 from geoalchemy2 import Geometry
+from shapely.geometry import mapping
 from database import Base
 
 #用户表
@@ -28,42 +29,22 @@ class UserToken(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False,comment="过期时间")
 
 
-#点位表
-class PointFeature(Base):
-    __tablename__ = "point_feature"
-    __table_args__ = (Index('idx_point_geom', 'geom', postgresql_using='gist'),{"comment": "空间点位表"})
+#要素模型公共基类：点/线/面共用的几何处理方法（WKT、字典、GeoJSON 输出）
+class FeatureBase(Base):
+    __abstract__ = True   # 不生成数据库表，只作为公共方法仓库
 
-
-    # 业务字段
-    name: Mapped[str] = mapped_column(String(100), nullable=False, comment="点位名称")
-    id: Mapped[int] = mapped_column(primary_key=True, comment="主键ID")
-    userid: Mapped[int] = mapped_column(ForeignKey(User.userid), nullable=False, comment="用户id")
-    address: Mapped[str | None] = mapped_column(String(255), comment="点位地址")
-    coord_sys: Mapped[int] = mapped_column(Integer, default=4326, comment="输入坐标系SRID")
-
-    # GIS核心字段：POINT类型，坐标系由 coord_sys 字段决定
-    geom: Mapped[Geometry] = mapped_column(
-        Geometry(geometry_type="POINT"),
-        nullable=False,
-        comment="空间几何点位"
-    )
-
-    def get_wkt(self, geom_field: str):
+    #geom_field由调用to_dict()时传入。return point.to_dict(geom_field="geom")
+    def get_wkt(self, geom_field: str) -> str:
         """获取几何的WKT文本格式（如 POINT(120 30)）"""
+        #getattr(object, name[, default])
+        # - object ：要获取属性的对象
+        # - name ：属性的名称， 必须是字符串
+        # - default ：可选参数，当属性不存在时返回的默认值
+
         geom = getattr(self, geom_field)
         return to_shape(geom).wkt
 
-    def get_lon(self, geom_field: str) -> float:
-        """获取经度（X坐标）"""
-        geom = getattr(self, geom_field)
-        return to_shape(geom).x
-
-    def get_lat(self, geom_field: str) -> float:
-        """获取纬度（Y坐标）"""
-        geom = getattr(self, geom_field)
-        return to_shape(geom).y
-
-    def to_dict(self,geom_field):
+    def to_dict(self, geom_field):
         """转成前端可直接使用的字典（自动处理几何字段）"""
         return {
             "id": self.id,
@@ -71,19 +52,14 @@ class PointFeature(Base):
             "name": self.name,
             "address": self.address,
             "geom": self.get_wkt(geom_field),
-            "lon": self.get_lon(geom_field),
-            "lat": self.get_lat(geom_field),
             "create_time": self.create_time.strftime("%Y-%m-%d %H:%M:%S") if self.create_time else None,
-            "update_time": self.update_time.strftime("%Y-%m-%d %H:%M:%S") if self.create_time else None
+            "update_time": self.update_time.strftime("%Y-%m-%d %H:%M:%S") if self.update_time else None
         }
 
     def to_geojson_feature(self, output_coord_sys: int = 4326, transformed_geom=None) -> dict:
         """将要素转为标准 GeoJSON Feature 对象，支持坐标系转换"""
         # to_shape 将一个 数据库几何对象（WKBElement 或 WKTElement）转换成 Shapely 几何对象。它不仅能处理 WKB，也能处理 WKT 格式的封装对象。
         # from_shape：将一个 Shapely 几何对象 转换成 WKBElement（即数据库可存储的 WKB 格式的封装对象）。
-        from geoalchemy2.shape import to_shape,from_shape
-        from shapely.geometry import mapping
-
         # 使用转换后的几何对象（如果提供），否则使用原始几何
         geom = transformed_geom if transformed_geom is not None else self.geom
         geom_shapely = to_shape(geom)
@@ -105,9 +81,46 @@ class PointFeature(Base):
         }
 
 
+#点位表
+class PointFeature(FeatureBase):
+    __tablename__ = "point_feature"
+    __table_args__ = (Index('idx_point_geom', 'geom', postgresql_using='gist'),{"comment": "空间点位表"})
+
+
+    # 业务字段
+    name: Mapped[str] = mapped_column(String(100), nullable=False, comment="点位名称")
+    id: Mapped[int] = mapped_column(primary_key=True, comment="主键ID")
+    userid: Mapped[int] = mapped_column(ForeignKey(User.userid), nullable=False, comment="用户id")
+    address: Mapped[str | None] = mapped_column(String(255), comment="点位地址")
+    coord_sys: Mapped[int] = mapped_column(Integer, default=4326, comment="输入坐标系SRID")
+
+    # GIS核心字段：POINT类型，坐标系由 coord_sys 字段决定
+    geom: Mapped[Geometry] = mapped_column(
+        Geometry(geometry_type="POINT"),
+        nullable=False,
+        comment="空间几何点位"
+    )
+
+    def get_lon(self, geom_field: str) -> float:
+        """获取经度（X坐标）"""
+        geom = getattr(self, geom_field)
+        return to_shape(geom).x
+
+    def get_lat(self, geom_field: str) -> float:
+        """获取纬度（Y坐标）"""
+        geom = getattr(self, geom_field)
+        return to_shape(geom).y
+
+    def to_dict(self, geom_field):
+        """转成前端可直接使用的字典（自动处理几何字段）"""
+        d = super().to_dict(geom_field)
+        d["lon"] = self.get_lon(geom_field)
+        d["lat"] = self.get_lat(geom_field)
+        return d
+
 
 #线位表
-class LinestringFeature(Base):
+class LinestringFeature(FeatureBase):
     __tablename__ = "Linestring_feature"
     __table_args__ = (Index('idx_linestring_geom', 'geom', postgresql_using='gist'),{"comment": "空间线位表"})
 
@@ -124,55 +137,9 @@ class LinestringFeature(Base):
         comment="空间几何线位"
     )
 
-    def get_wkt(self, geom_field: str) -> str:
-        """获取几何的WKT文本格式（如 POINT(120 30)）"""
-        #getattr(object, name[, default])
-        # - object ：要获取属性的对象
-        # - name ：属性的名称， 必须是字符串
-        # - default ：可选参数，当属性不存在时返回的默认值
-
-        geom = getattr(self, geom_field)
-        return to_shape(geom).wkt
-
-    def to_dict(self,geom_field):
-        """转成前端可直接使用的字典（自动处理几何字段）"""
-        return {
-            "id": self.id,
-            "userid": self.userid,
-            "name": self.name,
-            "address": self.address,
-            "geom": self.get_wkt(geom_field),
-            "create_time": self.create_time.strftime("%Y-%m-%d %H:%M:%S"),
-            "update_time": self.update_time.strftime("%Y-%m-%d %H:%M:%S")
-        }
-
-    def to_geojson_feature(self, output_coord_sys: int = 4326, transformed_geom=None) -> dict:
-        """将要素转为标准 GeoJSON Feature 对象，支持坐标系转换"""
-        from geoalchemy2.shape import to_shape
-        from shapely.geometry import mapping
-
-        geom = transformed_geom if transformed_geom is not None else self.geom
-        geom_shapely = to_shape(geom)
-        geometry_dict = mapping(geom_shapely)
-
-        return {
-            "type": "Feature",
-            "geometry": geometry_dict,
-            "properties": {
-                "id": self.id,
-                "userid": self.userid,
-                "name": self.name,
-                "address": self.address,
-                "coord_sys": self.coord_sys,
-                "create_time": self.create_time.isoformat() if self.create_time else None,
-                "update_time": self.update_time.isoformat() if self.update_time else None,
-            }
-        }
-
-
 
 #面位表
-class PolygonFeature(Base):
+class PolygonFeature(FeatureBase):
     __tablename__ = "Polygon_feature"
     __table_args__ = (Index('idx_polygon_geom', 'geom', postgresql_using='gist'),{"comment": "空间面位表"})
 
@@ -189,42 +156,12 @@ class PolygonFeature(Base):
         comment="空间几何面"
     )
 
-    def get_wkt(self, geom_field: str) -> str:
-        """获取几何的WKT文本格式（如 POINT(120 30)）"""
-        geom = getattr(self, geom_field)
-        return to_shape(geom).wkt
+class SpatialRefSys(Base):
+    __tablename__ = "spatial_ref_sys"
 
-    def to_dict(self,geom_field):
-        """转成前端可直接使用的字典（自动处理几何字段）"""
-        return {
-            "id": self.id,
-            "userid": self.userid,
-            "name": self.name,
-            "address": self.address,
-            "geom": self.get_wkt(geom_field),
-            "create_time": self.create_time.strftime("%Y-%m-%d %H:%M:%S"),
-            "update_time": self.update_time.strftime("%Y-%m-%d %H:%M:%S")
-        }
+    srid : Mapped[int] = mapped_column(Integer,nullable=False,primary_key=True)
+    auth_name : Mapped[str] = mapped_column(String(255))
+    auth_srid : Mapped[int] = mapped_column(Integer)
+    srtext : Mapped[str] = mapped_column(String(Text))
+    proj4text : Mapped[str] = mapped_column(String(Text))
 
-    def to_geojson_feature(self, output_coord_sys: int = 4326, transformed_geom=None) -> dict:
-        """将要素转为标准 GeoJSON Feature 对象，支持坐标系转换"""
-        from geoalchemy2.shape import to_shape
-        from shapely.geometry import mapping
-
-        geom = transformed_geom if transformed_geom is not None else self.geom
-        geom_shapely = to_shape(geom)
-        geometry_dict = mapping(geom_shapely)
-
-        return {
-            "type": "Feature",
-            "geometry": geometry_dict,
-            "properties": {
-                "id": self.id,
-                "userid": self.userid,
-                "name": self.name,
-                "address": self.address,
-                "coord_sys": self.coord_sys,
-                "create_time": self.create_time.isoformat() if self.create_time else None,
-                "update_time": self.update_time.isoformat() if self.update_time else None,
-            }
-        }

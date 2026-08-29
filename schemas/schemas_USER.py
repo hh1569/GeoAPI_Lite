@@ -13,7 +13,7 @@ class UserDetail(BaseModel):
     phone: str
     update_time: datetime
     model_config = ConfigDict(
-            from_attributes=True,  # 允许从ORM对象属性取值
+            from_attributes=True,  # 允许从ORM对象属性取值。"修改用户信息"函数直接返回orm。校验规则和上面写的字典大致一样
         )
 
 class UserUpdate(BaseModel):

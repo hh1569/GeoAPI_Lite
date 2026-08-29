@@ -5,15 +5,18 @@ from database import create_tables
 from api import router_point,router_linestring,router_polygon,router_gis,router_user
 from api_amap import router_amap
 
+    # ORM 实体 = 模型类的实例 → 类里定义的所有东西都在它身上。
+    # Row = 只有数据的行容器 → 只有"列的值",模型类里定义的方法它一个都没有。
+
 # 应用生命周期管理
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # 启动时执行：建表
     await create_tables()
-    print("数据库表创建完成，FastAPI-GIS项目启动")
+    print("数据库表创建完成，服务启动")
     yield
     # 关闭时执行：释放资源
-    print("应用关闭，资源释放")
+    print("服务关闭，资源释放")
 
 # FastAPI应用实例
 app = FastAPI(
@@ -39,6 +42,10 @@ app.include_router(router_linestring)
 app.include_router(router_polygon)
 app.include_router(router_gis)
 app.include_router(router_amap)
+
+
+from test.any.api import router_any
+app.include_router(router_any)
 
 # 健康检查接口
 @app.get("/", summary="健康检查")

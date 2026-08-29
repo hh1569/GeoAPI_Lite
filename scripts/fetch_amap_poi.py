@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from sqlalchemy import select
 
-from crud.crud_POINT import create_point
+from crud import crud_any
 from database import AsyncSessionLocal
 from models import PointFeature, User
 from schemas.schemas_POINT import PointCreate
@@ -88,7 +88,7 @@ async def main():
                 geom=f"POINT({poi['lon']} {poi['lat']})",   # WGS84，与项目默认 4326 一致
                 coord_sys=4326,
             )
-            await create_point(db, userid, point)   # 每次独立 commit，量小可接受
+            await crud_any.create(db=db, userid=userid, sch=point, mod=PointFeature)   # 每次独立 commit，量小可接受
             existing.add(poi["name"])
             inserted += 1
 

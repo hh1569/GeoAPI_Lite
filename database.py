@@ -23,7 +23,10 @@ class Base(DeclarativeBase):
         comment="更新时间"
     )
 
-
+# 数据库连接由 FastAPI 依赖注入统一管理：
+# create_async_engine 建立数据库连接池并生成异步引擎，
+# async_sessionmaker 将引擎封装为会话工厂 AsyncSessionLocal；
+# 每个请求抵达时，get_db 从工厂创建一个独立的 AsyncSession 供接口使用，请求结束自动归还连接池。
 
 # 数据库依赖注入
 async def get_db() -> AsyncSession:
@@ -58,4 +61,6 @@ AsyncSessionLocal = async_sessionmaker(
 async def create_tables():
     """应用启动时自动创建所有表"""
     async with async_engine.begin() as conn:
+        #创建一个带事务的连接，执行完自动提交
+        #begin()如果一件事本就只发生一次（启动建表、定时扫描、关停清场），写成"直接调用"
         await conn.run_sync(Base.metadata.create_all)

@@ -5,14 +5,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from sqlalchemy import select, func
 
-from models import LinestringFeature, PolygonFeature, PointFeature
-from crud import crud_LINESTRING, crud_POLYGON
+from models import LinestringFeature, PolygonFeature, PointFeature, SpatialRefSys
+from crud import crud_any
 import pandas
 import io
 
 # ------------------------------
 # 数据统计
+# #这写的什么东西
 # ------------------------------
+
+
 
 async def get_summary(db: AsyncSession, userid: int) -> dict:
     """统计当前用户各图层要素数量"""
@@ -31,6 +34,7 @@ async def get_summary(db: AsyncSession, userid: int) -> dict:
         result[key] = count
         total += count
     result["total"] = total
+    #{'point': 27, 'linestring': 11, 'polygon': 9, 'total': 47}
     return result
 
 
@@ -44,12 +48,13 @@ async def validate_srid(db: AsyncSession, srid: int) -> bool:
     :param srid: 要校验的 SRID
     :return: True 存在，False 不存在
     """
-    from sqlalchemy import text
     row = await db.execute(
-        text("SELECT COUNT(*) FROM spatial_ref_sys WHERE srid = :srid"),
-        {"srid": srid}
+        select(SpatialRefSys.srid).where(SpatialRefSys.srid == srid)
     )
-    return row.scalar() > 0
+    if row.scalar_one_or_none():
+        return True
+    else:
+        return False
 
 
 def transform_geom_col(model, target_srid: int):
@@ -274,7 +279,7 @@ async def geometry_in_geometry(db: AsyncSession,table_1,table_2,userid: int,tabl
 
 async def get_linestring_length(db: AsyncSession, linestring_id: int,userid: int):
     """计算长度"""
-    result  = await crud_LINESTRING.get_linestring_by_id(db=db, linestring_id=linestring_id, userid=userid)
+    result = await crud_any.get_by_id(models=LinestringFeature, db=db, lay_id=linestring_id, userid=userid)
     if result:
         result = await db.execute(select(
                 func.ST_Length(LinestringFeature.geom, True)#True = 计算真实地理长度
@@ -287,7 +292,7 @@ async def get_linestring_length(db: AsyncSession, linestring_id: int,userid: int
 
 async def get_polygon_area(db: AsyncSession, polygon_id: int,userid: int):
     """计算面积"""
-    rsult = crud_POLYGON.get_polygon_by_id(db=db, polygon_id=polygon_id,userid=userid)
+    rsult = await crud_any.get_by_id(models=PolygonFeature, db=db, lay_id=polygon_id,userid=userid)
     if rsult:
         result = await db.execute(select(
             func.ST_Area(PolygonFeature.geom, True)

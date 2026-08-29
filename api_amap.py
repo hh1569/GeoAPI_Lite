@@ -13,9 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette import status
 
-from crud.crud_LINESTRING import create_linestring
-from crud.crud_POINT import create_point
-from crud.crud_POLYGON import create_polygon
+from crud import crud_any
 from database import get_db
 from models import LinestringFeature, PointFeature, PolygonFeature, User
 from schemas.schemas_LINESTRING import LinestringCreate
@@ -33,7 +31,7 @@ async def amap_search(
     keywords: str | None = Query(None, description="关键词（按名称搜，与 types 二选一）"),
     city: str = Query("520400", description="城市名或adcode，默认520400=安顺市"),
     pages: int = Query(1, ge=1, le=10, description="抓取页数（每页25条）"),
-    user: User = Depends(current_user),
+    user: User = Depends(current_user)
 ):
     """查询高德并返回结果（坐标已转 WGS84），不写入数据库"""
     if not types and not keywords:
@@ -83,7 +81,7 @@ async def amap_search_import(
             geom=f"POINT({poi['lon']} {poi['lat']})",   # 已是 WGS84，与项目 4326 一致
             coord_sys=4326,
         )
-        await create_point(db, user.userid, point)
+        await crud_any.create(db=db, userid=user.userid, sch=point, mod=PointFeature)
         existing.add(poi["name"])
         inserted += 1
 
@@ -99,7 +97,7 @@ async def amap_search_import(
 async def amap_geocode(
     address: str = Query(..., description="地址文本，如：安顺学院"),
     city: str | None = Query(None, description="限定城市（可选），如：安顺市"),
-    user: User = Depends(current_user),
+    user: User = Depends(current_user)
 ):
     """地址转坐标，返回 WGS84 经纬度"""
     try:
@@ -173,7 +171,7 @@ async def amap_district_import(
             geom=d["wkt"],          # 已转 WGS84
             coord_sys=4326,
         )
-        await create_polygon(db, polygon, user.userid)
+        await crud_any.create(db=db, userid=user.userid, sch=polygon, mod=PolygonFeature)
         inserted += 1
 
     return {
@@ -243,7 +241,7 @@ async def amap_route_import(
         geom=result["wkt"],
         coord_sys=4326,
     )
-    await create_linestring(db, line, user.userid)
+    await crud_any.create(db=db, userid=user.userid, sch=line, mod=LinestringFeature)
     return {
         "inserted": 1,
         "distance_m": result["distance_m"],

@@ -10,7 +10,7 @@ from starlette import status
 
 from database import get_db
 from schemas import schemas_POINT,schemas_LINESTRING,schemas_POLYGON,schemas_GIS,schemas_USER
-from crud import crud_POINT, crud_LINESTRING, crud_POLYGON, gis, crud_user, crud_token
+from crud import crud_any, gis, crud_user, crud_token
 from crud.gis import transform_features, validate_srid
 from models import PointFeature, LinestringFeature, PolygonFeature, User
 from utils.auth import current_user
@@ -30,7 +30,11 @@ router_gis = APIRouter(prefix='/api/gis', tags=["Geo"])
 # ------------------------------
 
 @router_user.post("/register",summary="创建用户")
+
+#手机号没有限制位数。。。。。。。
 async def create_user(user_data: schemas_USER.UserCreate,db: AsyncSession = Depends(get_db)):
+    #Depends管理get_db执行时机
+    #AsyncSession 数据类型
     user = await crud_user.get_user_username(db=db,username=user_data.name)
     if user:
         raise HTTPException(status_code=400,detail="用户名已存在")
@@ -82,11 +86,11 @@ async def get_test(db: AsyncSession = Depends(get_db),user: User = Depends(curre
 # ------------------------------
 @router_point.post("/", summary="创建点位", response_model=schemas_POINT.PointDetail)
 async def create_point(
-    point_in: schemas_POINT.PointCreate,
-    db: AsyncSession = Depends(get_db),
+    point_in: schemas_POINT.PointCreate,#从前端传递到模型
+    db: AsyncSession = Depends(get_db),#从函数注入
     user: User = Depends(current_user)
 ):
-    point = await crud_POINT.create_point(db=db, userid=user.userid, point_data=point_in)#-->PointFeature
+    point = await crud_any.create(db=db, userid=user.userid, sch=point_in, mod=PointFeature)#-->PointFeature
     return point.to_geojson_feature()
 
 @router_linestring.post("/", summary="创建线", response_model=schemas_LINESTRING.LinestringDetail)
@@ -95,7 +99,7 @@ async def create_linestring(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(current_user)
 ):
-    linestring = await crud_LINESTRING.create_linestring(db=db,userid=user.userid ,linestring_data=linestring_in)
+    linestring = await crud_any.create(db=db, userid=user.userid, sch=linestring_in, mod=LinestringFeature)
     return linestring.to_geojson_feature()
 
 @router_polygon.post("/", summary="创建面", response_model=schemas_POLYGON.PolygonDetail)
@@ -104,16 +108,17 @@ async def create_polygon(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(current_user)
 ):
-    polygon_in = await crud_POLYGON.create_polygon(db=db, userid=user.userid, polygon_data=polygon_in)
-    return polygon_in.to_geojson_feature()
+    polygon = await crud_any.create(db=db, userid=user.userid, sch=polygon_in, mod=PolygonFeature)
+    return polygon.to_geojson_feature()
 
 @router_point.get("/list", summary="查询所有点位")
 async def get_all_points(
     page: int = Query(1,ge=1),
+    limit: int = Query(10,ge=1,le=50),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(current_user)
 ):
-    points_all,points_count = await crud_POINT.get_all_points(db=db,userid=user.userid,page=page)
+    points_all,points_count = await crud_any.get_all(models=PointFeature,db=db,userid=user.userid,page=page,limit=limit)
     return to_feature_collection(points_all)
 
 @router_linestring.get("/list", summary="查询所有线位")
@@ -122,7 +127,7 @@ async def get_all_linestring(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(current_user)
 ):
-    linestrings_all,linestrings_count = await crud_LINESTRING.get_all_linestrings(db=db,userid=user.userid,page=page)
+    linestrings_all,linestrings_count = await crud_any.get_all(models=LinestringFeature,db=db,userid=user.userid,page=page)
     return to_feature_collection(linestrings_all)
 
 @router_polygon.get("/list", summary="查询所有面")
@@ -131,7 +136,7 @@ async def get_all_polygon(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(current_user)
 ):
-    polygons_all,polygons_count = await crud_POLYGON.get_all_polygons(db=db,userid=user.userid,page=page)
+    polygons_all,polygons_count = await crud_any.get_all(models=PolygonFeature,db=db,userid=user.userid,page=page)
     return to_feature_collection(polygons_all)
 
 @router_point.get("/{point_id}", summary="根据ID查询点位", response_model=schemas_POINT.PointDetail)
@@ -141,7 +146,7 @@ async def get_point_detail(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(current_user)
 ):
-    point = await crud_POINT.get_point_by_id(db=db, point_id=point_id,userid=user.userid,output_coord_sys=output_coord_sys)
+    point = await crud_any.get_by_id(models=PointFeature, db=db, lay_id=point_id,userid=user.userid,output_coord_sys=output_coord_sys)
     if not point:
         raise HTTPException(status_code=404, detail="点位不存在")
     return point.to_geojson_feature()
@@ -153,7 +158,7 @@ async def get_linestring_detail(
         db: AsyncSession = Depends(get_db),
         user: User = Depends(current_user)
 ):
-    linestring = await crud_LINESTRING.get_linestring_by_id(db, linestring_id,userid=user.userid,output_coord_sys=output_coord_sys)
+    linestring = await crud_any.get_by_id(models=LinestringFeature, db=db, lay_id=linestring_id,userid=user.userid,output_coord_sys=output_coord_sys)
     if not linestring:
         raise HTTPException(status_code=404, detail="线不存在")
     return linestring.to_geojson_feature()
@@ -165,7 +170,7 @@ async def get_polygon_detail(
         db: AsyncSession = Depends(get_db),
         user: User = Depends(current_user)
 ):
-    polygon = await crud_POLYGON.get_polygon_by_id(db, polygon_id,userid=user.userid,output_coord_sys=output_coord_sys)
+    polygon = await crud_any.get_by_id(models=PolygonFeature, db=db, lay_id=polygon_id,userid=user.userid,output_coord_sys=output_coord_sys)
     if not polygon:
         raise HTTPException(status_code=404, detail="面不存在")
     return polygon.to_geojson_feature()
@@ -177,8 +182,8 @@ async def update_point(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(current_user)
 ):
-    point = await crud_POINT.update_point(
-        db=db, point_id=point_id, update_data=point_in.model_dump(),userid=user.userid
+    point = await crud_any.update_lay(
+        models=PointFeature, db=db, lay_id=point_id, update_data=point_in.model_dump(),userid=user.userid
     )
     if not point:
         raise HTTPException(status_code=404, detail="点位不存在")
@@ -191,7 +196,7 @@ async def update_linestring(
         db: AsyncSession = Depends(get_db),
         user: User = Depends(current_user)
 ):
-    linestring = await crud_LINESTRING.update_linestring(db, linestring_id, linestring_in.model_dump(),userid=user.userid)
+    linestring = await crud_any.update_lay(models=LinestringFeature, db=db, lay_id=linestring_id, update_data=linestring_in.model_dump(),userid=user.userid)
     if not linestring:
         raise HTTPException(status_code=404,detail="线不存在")
     return linestring.to_geojson_feature()
@@ -203,7 +208,7 @@ async def update_polygon(
         user: User = Depends(current_user),
         db: AsyncSession = Depends(get_db)
 ):
-    polygon = await crud_POLYGON.update_polygon(db=db, polygon_id=polygon_id, update_data=polygon_in.model_dump(),userid=user.userid)
+    polygon = await crud_any.update_lay(models=PolygonFeature, db=db, lay_id=polygon_id, update_data=polygon_in.model_dump(),userid=user.userid)
     if not polygon:
         raise HTTPException(status_code=404,detail="面不存在")
     return polygon.to_geojson_feature()
@@ -214,7 +219,7 @@ async def delete_point(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(current_user)
 ):
-    result = await crud_POINT.delete_point(db=db, point_id=point_id,userid=user.userid)
+    result = await crud_any.delete_lay(models=PointFeature, db=db, lay_id=point_id,userid=user.userid)
     if not result:
         raise HTTPException(status_code=404, detail="点位不存在")
     return {"message": "删除成功", "id": point_id}
@@ -225,7 +230,7 @@ async def delete_linestring(
         db: AsyncSession = Depends(get_db),
         user: User = Depends(current_user)
 ):
-    result = await crud_LINESTRING.delete_linestring(db=db, linestring_id=linestring_id, userid=user.userid)
+    result = await crud_any.delete_lay(models=LinestringFeature, db=db, lay_id=linestring_id, userid=user.userid)
     if not result:
         raise HTTPException(status_code=404,detail="线不存在")
     return {"message": "删除成功", "id": linestring_id}
@@ -236,7 +241,7 @@ async def delete_polygon(
         db: AsyncSession = Depends(get_db),
         user: User = Depends(current_user)
 ):
-    result = await crud_POLYGON.delete_polygon(db=db, polygon_id=polygon_id,userid=user.userid)
+    result = await crud_any.delete_lay(models=PolygonFeature, db=db, lay_id=polygon_id,userid=user.userid)
     if not result:
         raise HTTPException(status_code=404,detail="面不存在")
     return {"message": "删除成功", "id": polygon_id}
@@ -306,7 +311,8 @@ async def get_by_geometry(
         table1_id: int = Query(None,description="范围图层、要素id，不填则所有要素合并去查询"),
         page: int = Query(1,ge=1)
 ):
-#table_1自动获取成员LayerName.point
+    # table_1自动获取成员LayerName.point
+    # table_1 = LayerName(table_1) = table_1.point...自动完成
     table_1 = LAYER_MODEL_MAP[table_1]
     table_2 = LAYER_MODEL_MAP[table_2]
 
