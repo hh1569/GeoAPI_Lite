@@ -232,6 +232,7 @@ AMAP_KEY=你的Web服务Key
 | 4326 | WGS84 | GPS 全球坐标（默认） |
 | 4490 | CGCS2000 | 中国国家大地坐标系 |
 | 3857 | Web Mercator | 网络地图投影（单位：米） |
+更多坐标系查询epsg.io（部分无效）
 
 查询时可传 `output_coord_sys` 参数指定输出坐标系，不传则返回原始坐标。导入时可在 Excel 中加 `coord_sys` 列指定每行的坐标系。
 
