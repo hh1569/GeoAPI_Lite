@@ -67,3 +67,39 @@ class BboxQuery(BaseModel):
 
         return values
 
+
+class PoiAnalysisQuery(BaseModel):
+    """POI 空间分析公共入参"""
+    name_keyword: str | None = Field(default=None, description="按名称关键字过滤点位（模糊匹配），如 医院、餐饮")
+    min_lon: float | None = Field(default=None, description="分析范围最小经度")
+    min_lat: float | None = Field(default=None, description="分析范围最小纬度")
+    max_lon: float | None = Field(default=None, description="分析范围最大经度")
+    max_lat: float | None = Field(default=None, description="分析范围最大纬度")
+
+    @model_validator(mode="after")
+    def check_bbox(self):
+        vals = [self.min_lon, self.min_lat, self.max_lon, self.max_lat]
+        if any(v is not None for v in vals):
+            if any(v is None for v in vals):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="分析范围需同时提供 min_lon、min_lat、max_lon、max_lat"
+                )
+            if self.min_lon >= self.max_lon or self.min_lat >= self.max_lat:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="分析范围 min 值必须小于 max 值"
+                )
+        return self
+
+
+class KdeQuery(PoiAnalysisQuery):
+    """核密度分析入参"""
+    grid_size: int = Field(default=60, ge=20, le=150, description="格网行列数（生成 N×N 个格网单元）")
+    bandwidth: float | None = Field(default=None, gt=0, description="核密度带宽（米），不传自动取分析范围最大跨度的 1/30")
+
+
+class KmeansQuery(PoiAnalysisQuery):
+    """K均值空间聚类入参"""
+    k: int = Field(default=5, ge=2, le=30, description="聚类数量")
+

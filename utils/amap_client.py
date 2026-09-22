@@ -2,16 +2,14 @@
 高德开放平台 Web 服务 API 客户端
 官方文档：https://lbs.amap.com/api/webservice/summary
 
-⚠️ 坐标系说明（GIS 必修课）：
-    高德返回的坐标是 GCJ-02（火星坐标系，国家加密偏移坐标系），
-    与项目使用的 WGS84(4326) 存在约几十到几百米的偏差，
-    入库前必须调用 gcj02_to_wgs84() 转换，否则空间分析结果全错。
+高德返回的坐标是 GCJ-02（火星坐标系，国家加密偏移坐标系），
+与项目使用的 WGS84(4326) 存在约几十到几百米的偏差，
+入库前必须转换，否则空间分析结果全错。
 """
-import json
 import math
 import time
-from urllib.parse import urlencode
-from urllib.request import Request, urlopen
+
+import requests
 
 from config import settings
 
@@ -22,24 +20,28 @@ AMAP_BASE = "https://restapi.amap.com/v3"
 # 坐标系转换：GCJ-02 → WGS84（公开的纠偏算法，精度约几米，学习够用）
 # ============================================================
 def _out_of_china(lon: float, lat: float) -> bool:
-    """判断是否在中国境外（境外无偏移，无需转换）"""
+    """初略判断是否在中国境外（境外无偏移，无需转换）"""
     return not (72.004 <= lon <= 137.8347 and 0.8293 <= lat <= 55.8271)
 
 
-def _transform_lat(lon: float, lat: float) -> float:
-    ret = -100.0 + 2.0 * lon + 3.0 * lat + 0.2 * lat * lat + 0.1 * lon * lat + 0.2 * math.sqrt(abs(lon))
-    ret += (20.0 * math.sin(6.0 * lon * math.pi) + 20.0 * math.sin(2.0 * lon * math.pi)) * 2.0 / 3.0
-    ret += (20.0 * math.sin(lat * math.pi) + 40.0 * math.sin(lat / 3.0 * math.pi)) * 2.0 / 3.0
-    ret += (160.0 * math.sin(lat / 12.0 * math.pi) + 320.0 * math.sin(lat * math.pi / 30.0)) * 2.0 / 3.0
-    return ret
-
-
 def _transform_lon(lon: float, lat: float) -> float:
-    ret = 300.0 + lon + 2.0 * lat + 0.1 * lon * lon + 0.1 * lon * lat + 0.1 * math.sqrt(abs(lon))
-    ret += (20.0 * math.sin(6.0 * lon * math.pi) + 20.0 * math.sin(2.0 * lon * math.pi)) * 2.0 / 3.0
-    ret += (20.0 * math.sin(lon * math.pi) + 40.0 * math.sin(lon / 3.0 * math.pi)) * 2.0 / 3.0
-    ret += (150.0 * math.sin(lon / 12.0 * math.pi) + 300.0 * math.sin(lon / 30.0 * math.pi)) * 2.0 / 3.0
-    return ret
+    #东西方向的差
+    x = 300.0 + lon + 2.0 * lat + 0.1 * lon * lon + 0.1 * lon * lat + 0.1 * math.sqrt(abs(lon))
+    x += (20.0 * math.sin(6.0 * lon * math.pi) + 20.0 * math.sin(2.0 * lon * math.pi)) * 2.0 / 3.0
+    x += (20.0 * math.sin(lon * math.pi) + 40.0 * math.sin(lon / 3.0 * math.pi)) * 2.0 / 3.0
+    x += (150.0 * math.sin(lon / 12.0 * math.pi) + 300.0 * math.sin(lon / 30.0 * math.pi)) * 2.0 / 3.0
+    return x
+
+
+def _transform_lat(lon: float, lat: float) -> float:
+    """高德返的是 GCJ-02"""
+    #火星坐标和原始坐标...南北方向的差
+    y = -100.0 + 2.0 * lon + 3.0 * lat + 0.2 * lat * lat + 0.1 * lon * lat + 0.2 * math.sqrt(abs(lon))
+    y += (20.0 * math.sin(6.0 * lon * math.pi) + 20.0 * math.sin(2.0 * lon * math.pi)) * 2.0 / 3.0
+    y += (20.0 * math.sin(lat * math.pi) + 40.0 * math.sin(lat / 3.0 * math.pi)) * 2.0 / 3.0
+    y += (160.0 * math.sin(lat / 12.0 * math.pi) + 320.0 * math.sin(lat * math.pi / 30.0)) * 2.0 / 3.0
+    return y
+
 
 
 def gcj02_to_wgs84(lon: float, lat: float) -> tuple[float, float]:
@@ -80,17 +82,38 @@ def wgs84_to_gcj02(lon: float, lat: float) -> tuple[float, float]:
 def _request(params: dict, path: str = "/place/text") -> dict:
     """发 GET 请求并解析响应，公共参数自动带上 Key"""
     params["key"] = settings.AMAP_KEY
-    url = f"{AMAP_BASE}{path}?{urlencode(params)}"
-    req = Request(url, headers={"User-Agent": "GeoAPI_Lite/1.0"})
-    with urlopen(req, timeout=10) as resp:
-        data = json.loads(resp.read().decode("utf-8"))
+    url = f"{AMAP_BASE}{path}"
+    resp = requests.get(url, params=params,headers={"User-Agent": "GeoAPI_Lite/1.0"}, timeout=10)
+    data = resp.json()
 
-    if data.get("status") != "1":
+    if data.get("status") != "1":#高德的接口有个特点：不管成功还是失败，HTTP 状态码都是 200。依靠"status": "1"判断
         raise RuntimeError(f"高德 API 错误：{data.get('info')}（infocode: {data.get('infocode')}）")
     return data
 
+    # {
+    # 'suggestion': {'keywords': [], 'cities': []},
+    # 'count': '99',
+    # 'infocode': '10000',
+    # 'pois': [
+    #     {'parent': [], 'distance': [], 'keytag': '学院', 'importance': [], 'biz_ext': [],
+    #      'type': '科教文化服务;学校;高等院校', 'photos': [], 'building': [], 'typecode': '141201', 'shopinfo': '0',
+    #      'poiweight': [], 'adname': '西秀区', 'featured_reviews_remake': [], 'tel': [], 'id': 'B03550I7NN',
+    #      'address': '安顺开发区学院路25号', 'space_num': [], 'pname': '贵州省', 'biz_type': [], 'cityname': '安顺市',
+    #      'childtype': [], 'atag': [], 'name': '安顺学院', 'location': '105.897069,26.243153', 'shopid': [],
+    #      'favorite_num': [], 'featured_reviews': []},
+    #     {'parent': [], 'distance': [], 'keytag': '宿舍', 'importance': [], 'biz_ext': [],
+    #      'type': '商务住宅;住宅区;宿舍', 'photos': [], 'building': [], 'typecode': '120303', 'shopinfo': '0',
+    #      'poiweight': [], 'adname': '西秀区', 'featured_reviews_remake': [], 'tel': [], 'id': 'B0MA5OQ3M5',
+    #      'address': '学院路与碧水路交叉口北80米', 'space_num': [], 'pname': '贵州省', 'biz_type': [],
+    #      'cityname': '安顺市', 'childtype': [], 'atag': [], 'name': '安顺学院5号学生宿舍楼',
+    #      'location': '105.903076,26.243328', 'shopid': [], 'favorite_num': [], 'featured_reviews': []}],
+    # 'status': '1',
+    # 'info': 'OK'
+    # }
 
-def search_poi(keywords: str, city: str = None, page: int = 1, offset: int = 25,
+
+
+def search_poi(keywords: str, city: str = None, page: int = 1, limit: int = 25,
                types: str = None, sleep: float = 0.35) -> dict:
     """
     关键词 POI 文本搜索（/place/text）
@@ -98,7 +121,7 @@ def search_poi(keywords: str, city: str = None, page: int = 1, offset: int = 25,
     参数：
         keywords: 搜索关键词，如 "学校"、"医院"
         city: 城市名或 adcode，如 "安顺市"（不传则全国搜索）
-        page / offset: 分页，单页最多 25 条
+        page / limit: 分页，单页最多 25 条
         types: 高德 POI 类型码（如 141100 大学、141200 中学），不传则按关键词搜
         sleep: 请求间隔秒数（免费 Key 有 QPS 限制，默认约 3 QPS 保险值）
 
@@ -107,10 +130,10 @@ def search_poi(keywords: str, city: str = None, page: int = 1, offset: int = 25,
     """
     params = {
         "page": page,
-        "offset": offset,
+        "offset": limit,
         "extensions": "base",
     }
-    # 注意：urlencode 会把 None 编码成字符串 "None"，所以 None 参数必须跳过
+    # 可选参数：值为 None 就不传（requests 会自动忽略 None，这里显式判断更清晰）
     if keywords:
         params["keywords"] = keywords
     if city:
@@ -118,10 +141,11 @@ def search_poi(keywords: str, city: str = None, page: int = 1, offset: int = 25,
     if types:
         params["types"] = types
 
-    data = _request(params)
+    data = _request(params = params)
 
     pois = []
-    for item in data.get("pois", []):
+    for item in data.get("pois", []):#响应格式转换py格式为[ {...}, {...}, {...} ]
+        #如果None进入循环报错，默认值为空列表
         lon_str, lat_str = item["location"].split(",")
         pois.append({
             "name": item.get("name", ""),
@@ -139,7 +163,7 @@ def search_poi(keywords: str, city: str = None, page: int = 1, offset: int = 25,
     return {"count": int(data.get("count", 0)), "pois": pois}
 
 
-def search_poi_many(keywords: str = None, city: str = None, pages: int = 1, offset: int = 25,
+def search_poi_many(keywords: str = None, city: str = None, page: int = 1, offset: int = 25,
                     types: str = None) -> list[dict]:
     """
     分页抓取 POI 并自动去重（高德分页在 POI 数超过 offset 时会出现偏移重复）
@@ -151,14 +175,15 @@ def search_poi_many(keywords: str = None, city: str = None, pages: int = 1, offs
 
     返回：去重后的 POI 列表（坐标已转为 WGS84）
     """
-    seen = set()
+    #在存入集合时会自动哈希一遍，在查找时直接查找哈希。。不用遍历，速度快
+    seen = set()#
     results = []
-    for page in range(1, pages + 1):
-        data = search_poi(keywords=keywords, city=city, page=page, offset=offset, types=types)
-        if not data["pois"]:
+    for page in range(1, page + 1):
+        data = search_poi(keywords=keywords, city=city, page=page, limit=offset, types=types)
+        if not data["pois"]:#空页
             break
         for poi in data["pois"]:
-            key = (poi["name"], poi["lon"], poi["lat"])
+            key = (poi["name"], poi["lon"], poi["lat"])#集合只收"可哈希"的对象
             if key in seen:
                 continue
             seen.add(key)

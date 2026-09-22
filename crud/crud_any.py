@@ -1,3 +1,5 @@
+from typing import Any
+
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 
@@ -56,7 +58,7 @@ async def get_by_id(
 
 
 async def get_all(models, db: AsyncSession, userid: int, page: int = 1, limit: int = 10):
-    """查询所有要素（返回数据库原始坐标，不做坐标转换）"""
+    """查询指定所有单个要素（返回数据库原始坐标，不做坐标转换）"""
     skip = (page-1)*limit
 
     result_all = await db.execute(
@@ -68,6 +70,31 @@ async def get_all(models, db: AsyncSession, userid: int, page: int = 1, limit: i
 
     result_count = await db.execute(select(func.count(models.id)).where(models.userid == userid))
     return points, result_count.scalar()
+
+async def get_any(
+        db: AsyncSession,
+        userid: int,
+        mod_list: list[Any],
+        page: int = 1,
+        limit: int = 10
+):
+    list_mod = []
+    count = 0
+    for mod in mod_list:
+        mod,s = await get_all(models=mod, db=db, userid=userid, page=page, limit=limit)
+        count = count + s
+        for i in mod:
+            list_mod.append(i)
+
+    return list_mod, count
+
+
+
+
+
+
+
+
 
 
 async def update_lay(models, db: AsyncSession, lay_id: int, update_data: dict, userid: int):

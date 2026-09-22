@@ -11,7 +11,7 @@ from starlette import status
 from database import get_db
 from schemas import schemas_POINT,schemas_LINESTRING,schemas_POLYGON,schemas_GIS,schemas_USER
 from crud import crud_any, gis, crud_user, crud_token
-from crud.gis import transform_features, validate_srid
+from crud.gis import validate_srid
 from models import PointFeature, LinestringFeature, PolygonFeature, User
 from utils.auth import current_user
 from utils.geojson import to_feature_collection
@@ -23,6 +23,7 @@ router_point = APIRouter(prefix="/api/point", tags=["Point"])
 router_linestring = APIRouter(prefix='/api/linestring', tags=["Linestring"])
 router_polygon = APIRouter(prefix='/api/polygon', tags=["Polygon"])
 router_gis = APIRouter(prefix='/api/gis', tags=["Geo"])
+router_analysis = APIRouter(prefix='/api/analysis', tags=["空间分析"])
 
 
 # ------------------------------
@@ -124,19 +125,21 @@ async def get_all_points(
 @router_linestring.get("/list", summary="查询所有线位")
 async def get_all_linestring(
     page: int = Query(1,ge=1),
+    limit: int = Query(10,ge=1,le=50),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(current_user)
 ):
-    linestrings_all,linestrings_count = await crud_any.get_all(models=LinestringFeature,db=db,userid=user.userid,page=page)
+    linestrings_all,linestrings_count = await crud_any.get_all(models=LinestringFeature,db=db,userid=user.userid,page=page,limit=limit)
     return to_feature_collection(linestrings_all)
 
 @router_polygon.get("/list", summary="查询所有面")
 async def get_all_polygon(
     page: int = Query(1,ge=1),
+    limit: int = Query(10,ge=1,le=50),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(current_user)
 ):
-    polygons_all,polygons_count = await crud_any.get_all(models=PolygonFeature,db=db,userid=user.userid,page=page)
+    polygons_all,polygons_count = await crud_any.get_all(models=PolygonFeature,db=db,userid=user.userid,page=page,limit=limit)
     return to_feature_collection(polygons_all)
 
 @router_point.get("/{point_id}", summary="根据ID查询点位", response_model=schemas_POINT.PointDetail)
@@ -246,14 +249,28 @@ async def delete_polygon(
         raise HTTPException(status_code=404,detail="面不存在")
     return {"message": "删除成功", "id": polygon_id}
 
+@router_gis.get("/all",summary="查询所有或指定要素")
+async def get_all(
+        db: AsyncSession = Depends(get_db),
+        user: User = Depends(current_user),
+        page: int = Query(1, ge=1),
+        limit: int = Query(10, ge=1, le=50),
+        tab_1: LayerName = None,
+        tab_2: LayerName = None,
+        tab_3: LayerName = None
+):
+    list_mod = [LAYER_MODEL_MAP[i] for i in [tab_1,tab_2,tab_3] if i is not None]
 
-
+    if not list_mod:
+        raise HTTPException(status_code=400,detail="至少选择一个")
+    mod,count = await crud_any.get_any(db=db,userid=user.userid,mod_list=list_mod,page=page,limit=limit)
+    return {"Feature":to_feature_collection(mod),"count":count}
 
 
 # ------------------------------
 # GIS空间查询接口
 # ------------------------------
-@router_gis.post("/nearby", summary="附近点位查询")
+@router_gis.post("/nearby", summary="附近要素查询")
 async def get_nearby(
     query: schemas_GIS.NearbyQuery,
     output_coord_sys: int = Query(default=4326, description="输出坐标系SRID，默认4326(WGS84)。常用：4326(WGS84), 4490(CGCS2000), 3857(Web墨卡托)"),
@@ -312,11 +329,11 @@ async def get_by_geometry(
         page: int = Query(1,ge=1)
 ):
     # table_1自动获取成员LayerName.point
-    # table_1 = LayerName(table_1) = table_1.point...自动完成
-    table_1 = LAYER_MODEL_MAP[table_1]
-    table_2 = LAYER_MODEL_MAP[table_2]
+    # table_1 = LayerName(table_1) = LayerName.point...通过值获取成员
+    table_1_1 = LAYER_MODEL_MAP[table_1]#table_1=LayerName.point
+    table_2_2 = LAYER_MODEL_MAP[table_2]
 
-    geometry = await gis.get_by_geometry(db=db,userid=user.userid,table_1=table_1,table_2=table_2,table1_id=table1_id,page=page)
+    geometry = await gis.get_by_geometry(db=db,userid=user.userid,table_1=table_1_1,table_2=table_2_2,table1_id=table1_id,page=page)
     return to_feature_collection(geometry)
 
 @router_gis.get("/distance",summary="要素距离计算 / 要素到要素的最近点投影（第二个图层上，离第一个最近的那个点坐标）")
@@ -358,12 +375,13 @@ async def get_geometry_in_geometry(
     return to_feature_collection(in_geometry)
 
 
-@router_gis.get("/transform", summary="坐标转换（支持任意SRID）")
+@router_gis.get("/transform", summary="坐标转换（支持任意SRID,不入库）")
 async def transform_coord(
         layer: LayerName = Query(..., description="图层类型：point、line、polygon"),
         target_srid: int = Query(..., description="目标坐标系SRID，支持任意PostGIS已注册的SRID。常用：4326(WGS84)、4490(CGCS2000)、3857(Web墨卡托)"),
         feature_ids: str = Query(default=None, description="指定要素ID，多个用逗号分隔，如 1,2,3。不传则查询全部"),
         page: int = Query(1, ge=1),
+        limit: int = Query(10,ge=1,le=50),
         db: AsyncSession = Depends(get_db),
         user: User = Depends(current_user)
 ):
@@ -372,13 +390,39 @@ async def transform_coord(
         raise HTTPException(status_code=400, detail=f"目标坐标系 SRID {target_srid} 不存在，请检查是否为有效的PostGIS SRID")
 
     model = LAYER_MODEL_MAP[layer]
-    ids = [int(i.strip()) for i in feature_ids.split(",")] if feature_ids else None
+    if not feature_ids.strip():
+        raise HTTPException(status_code=400, detail="feature_ids 不能为空")
+    ids = [int(i.strip()) for i in feature_ids.split(",")]#split()按指定分隔符把字符串切成一个列表,strip()去掉首尾空白
 
-    features = await transform_features(
+    features = await gis.transform_coord(
         db=db, model=model, target_srid=target_srid,
-        userid=user.userid, feature_ids=ids, page=page
+        userid=user.userid, feature_list=ids, page=page,limit=limit
     )
     return to_feature_collection(features)
+
+@router_gis.get("/transform/save", summary="坐标转换（支持任意SRID，入库）")
+async def convert(
+        layer: LayerName = Query(..., description="图层类型：point、line、polygon"),
+        target_srid: int = Query(..., description="目标坐标系SRID，支持任意PostGIS已注册的SRID。常用：4326(WGS84)、4490(CGCS2000)、3857(Web墨卡托)"),
+        feature_ids: str = Query(..., description="指定要素ID，多个用逗号分隔，如 1,2,3。单个如 5"),
+        db: AsyncSession = Depends(get_db),
+        user: User = Depends(current_user)
+):
+    """将数据库中要素的坐标永久转换到目标坐标系（写库），支持单独/批量转换"""
+    if not await validate_srid(db, target_srid):
+        raise HTTPException(status_code=400, detail=f"目标坐标系 SRID {target_srid} 不存在，请检查是否为有效的PostGIS SRID")
+
+    model = LAYER_MODEL_MAP[layer]
+
+    if not feature_ids.strip():
+        raise HTTPException(status_code=400, detail="feature_ids 不能为空")
+    ids = [int(i.strip()) for i in feature_ids.split(",")]
+
+    count = await gis.convert_coord(
+        db=db, model=model, target_srid=target_srid,
+        userid=user.userid, feature_list=ids
+    )
+    return {"message": "ok", "count": count}
 
 
 @router_gis.get("/{linestring_id}/length",summary="计算线长度")
@@ -618,5 +662,50 @@ async def export_features(
         media_type=media_type,
         headers={"Content-Disposition": f'attachment; filename="{filename}"'}
     )
+
+
+# ------------------------------
+# 空间分析接口
+# ------------------------------
+@router_analysis.post("/kde", summary="核密度分析：返回热力格网 GeoJSON")
+async def kde_analysis(
+    query: schemas_GIS.KdeQuery,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(current_user),
+):
+    """对当前用户点位做核密度分析（可用 name_keyword 过滤，如 医院/餐饮），返回 N×N 格网单元 + 归一化密度值（0~1）"""
+    bbox = (query.min_lon, query.min_lat, query.max_lon, query.max_lat) if query.min_lon is not None else None
+    rows = await gis.fetch_poi_coords(db=db, userid=user.userid, name_keyword=query.name_keyword, bbox=bbox)
+    if len(rows) < 2:
+        raise HTTPException(status_code=400, detail=f"符合条件的点位不足（{len(rows)} 个），核密度分析至少需要 2 个点")
+
+    grid, bounds, bandwidth = await gis.kde_analysis(
+        rows=rows, grid_size=query.grid_size, bandwidth=query.bandwidth, bounds=bbox
+    )
+    return {
+        "point_count": len(rows),
+        "grid_size": query.grid_size,
+        "bandwidth": round(bandwidth, 1),
+        "bounds": [round(b, 6) for b in bounds],
+        "grid": grid,
+    }
+
+
+@router_analysis.post("/kmeans", summary="POI 空间聚类（ST_ClusterKMeans，不支持时自动降级 Python 实现）")
+async def kmeans_analysis(
+    query: schemas_GIS.KmeansQuery,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(current_user),
+):
+    """对当前用户点位做 K 均值空间聚类，返回簇质心、簇成员 GeoJSON 与各簇统计"""
+    bbox = (query.min_lon, query.min_lat, query.max_lon, query.max_lat) if query.min_lon is not None else None
+    rows = await gis.fetch_poi_coords(db=db, userid=user.userid, name_keyword=query.name_keyword, bbox=bbox)
+    if len(rows) < query.k:
+        raise HTTPException(status_code=400, detail=f"符合条件的点位不足（{len(rows)} 个），少于聚类数 {query.k}")
+
+    result = await gis.kmeans_analysis(
+        db=db, userid=user.userid, k=query.k, name_keyword=query.name_keyword, bbox=bbox
+    )
+    return result
 
 

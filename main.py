@@ -2,8 +2,11 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware  # 导入 CORS 中间件
 from database import create_tables
-from api import router_point,router_linestring,router_polygon,router_gis,router_user
+from api import router_point,router_linestring,router_polygon,router_gis,router_user,router_analysis
 from api_amap import router_amap
+
+
+# uvicorn main:app --reload
 
     # ORM 实体 = 模型类的实例 → 类里定义的所有东西都在它身上。
     # Row = 只有数据的行容器 → 只有"列的值",模型类里定义的方法它一个都没有。
@@ -42,10 +45,11 @@ app.include_router(router_linestring)
 app.include_router(router_polygon)
 app.include_router(router_gis)
 app.include_router(router_amap)
+app.include_router(router_analysis)
 
 
 from test.any.api import router_any
-app.include_router(router_any)
+# app.include_router(router_any)
 
 # 健康检查接口
 @app.get("/", summary="健康检查")

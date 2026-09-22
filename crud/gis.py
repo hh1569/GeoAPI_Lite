@@ -1,13 +1,16 @@
 from fastapi import UploadFile
 from geoalchemy2.shape import to_shape
+from pydantic.v1.typing import update_field_forward_refs
 from shapely.geometry import mapping
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from sqlalchemy import select, func
+from sqlalchemy import select, func, update
+from sqlalchemy.exc import DBAPIError
 
 from models import LinestringFeature, PolygonFeature, PointFeature, SpatialRefSys
 from crud import crud_any
 import pandas
+import numpy as np
 import io
 
 # ------------------------------
@@ -60,52 +63,47 @@ async def validate_srid(db: AsyncSession, srid: int) -> bool:
 def transform_geom_col(model, target_srid: int):
     """
     返回 SQLAlchemy 列表达式，用于在 SQL 中对 geom 列做坐标转换。
-    ST_Transform 会自动从 geom 读取源 SRID。
+    ST_Transform 转换坐标(自动从 geom 读取源 SRID)
     :param model: ORM 模型（PointFeature / LinestringFeature / PolygonFeature）
     :param target_srid: 目标坐标系 SRID
     :return: SQLAlchemy 列表达式，可直接用于 select()
     """
-    return func.ST_Transform(model.geom, target_srid).label('geom')
+    return func.ST_Transform(model.geom, target_srid)
 
 
-async def transform_features(
+async def transform_coord(
     db: AsyncSession,
     model,
     target_srid: int,
-    userid: int = None,
-    feature_ids: list[int] = None,
+    userid: int,
+    feature_list: list[int] = None,
     page: int = 1,
-    page_size: int = 6
+    limit: int = 10,
 ):
     """
-    独立的坐标转换查询函数。
+    独立的坐标转换查询函数（只读，不修改数据库）。
     根据目标 SRID 对数据库中的要素进行坐标转换后返回。
     ST_Transform 会自动从 geom 读取源 SRID。
 
-    :param db: 数据库会话
-    :param model: ORM 模型（PointFeature / LinestringFeature / PolygonFeature）
     :param target_srid: 目标坐标系 SRID（如 3857、4490）
-    :param userid: 用户 ID（可选，用于过滤）
-    :param feature_ids: 指定要素 ID 列表（可选，不传则查询全部）
+    :param feature_list: 指定要素 ID 列表（可选，不传则查询全部）
     :param page: 页码（默认 1）
-    :param page_size: 每页数量（默认 6）
+    :param limit: 每页数量（默认 10）
     :return: 转换后的要素列表
     """
-    geom_col = transform_geom_col(model, target_srid)
+    geom_col = transform_geom_col(model, target_srid).label("geom")
     stmt = (
         select(
             model.id, model.userid, model.name, model.address,
             model.coord_sys, model.create_time, model.update_time, geom_col
-        )
+        ).where(model.userid == userid)
     )
 
-    if userid is not None:
-        stmt = stmt.where(model.userid == userid)
-    if feature_ids:
-        stmt = stmt.where(model.id.in_(feature_ids))
+    if feature_list:
+        stmt = stmt.where(model.id.in_(feature_list))#WHERE model.id IN (1, 2, 3)......传入的必须是列表/元组
 
-    skip = (page - 1) * page_size
-    stmt = stmt.order_by(model.id).offset(skip).limit(page_size)
+    skip = (page - 1) * limit
+    stmt = stmt.order_by(model.id).offset(skip).limit(limit)
 
     result = await db.execute(stmt)
     rows = result.all()
@@ -115,11 +113,47 @@ async def transform_features(
         obj = model()
         for col in ['id', 'userid', 'name', 'address', 'coord_sys', 'create_time', 'update_time', 'geom']:
             setattr(obj, col, getattr(row, col))
+        # geom 已转换到目标坐标系，coord_sys 同步标注，保持返回数据一致
+        obj.coord_sys = target_srid
         features.append(obj)
 
     return features
 
-async def get_id_geometry(db: AsyncSession,table,tableid,userid: int):
+
+async def convert_coord(
+    db: AsyncSession,
+    model,
+    target_srid: int,
+    userid: int,
+    feature_list: list[int],
+) -> int:
+    """
+    坐标转换写入函数：将要素坐标永久转换到目标坐标系（写库）。
+    单独转换传单元素列表（如 [5]），批量转换传完整列表（如 [1,2,3]）。
+    geom 用 ST_Transform 转换，coord_sys 同步更新为 target_srid。
+    调用前建议先用 validate_srid 校验目标 SRID。
+
+    :param target_srid: 目标坐标系 SRID（如 4326、4490、3857）
+    :param feature_list: 要素 ID 列表，不能为空（写操作不允许全量无差别更新）
+    :return: 实际更新的行数
+    """
+    if not feature_list:
+        raise ValueError("feature_list 不能为空，单独转换传 [id]")
+
+    result = await db.execute(
+        update(model)
+        .where(model.userid == userid, model.id.in_(feature_list))
+        .values(
+            coord_sys=target_srid,
+            geom=func.ST_Transform(model.geom, target_srid)
+        )
+    )
+    await db.commit()
+    return result.rowcount
+
+
+
+async def get_id_geometry(db: AsyncSession, table,tableid,userid: int):
     result = await db.execute(select(table).
                         where(table.id == tableid, table.userid == userid))
     return result.scalar_one_or_none()
@@ -128,7 +162,7 @@ async def get_id_geometry(db: AsyncSession,table,tableid,userid: int):
 # GIS核心空间查询
 # ------------------------------
 async def get_nearby(db: AsyncSession, lon: float, lat: float, radius: float, table, userid: int,page: int):
-    """
+    """                                  错误，现在数据库不只4326一个坐标系
     附近点位查询（GIS核心功能）
     :param lon: 中心点经度
     :param lat: 中心点纬度
@@ -734,4 +768,222 @@ def shape_to_wkt(wkt_type: str, shape) -> str:
         return f"MULTIPOLYGON(({'), ('.join(rings)}))"
 
     raise ValueError(f"不支持的 WKT 类型: {wkt_type}")
+
+
+# ------------------------------
+# 空间分析（核密度 / K均值聚类）
+# ------------------------------
+async def fetch_poi_coords(
+    db: AsyncSession,
+    userid: int,
+    name_keyword: str | None = None,
+    bbox: tuple | None = None,
+):
+    """
+    取点位坐标，支持按名称关键字（模糊匹配，如 医院/餐饮）和分析范围过滤。
+    :param bbox: (min_lon, min_lat, max_lon, max_lat)，可选
+    :return: Row 列表，字段 id / name / lon / lat
+    """
+    stmt = select(
+        PointFeature.id, PointFeature.name,
+        func.ST_X(PointFeature.geom).label("lon"),
+        func.ST_Y(PointFeature.geom).label("lat"),
+    ).where(PointFeature.userid == userid)
+
+    if name_keyword:
+        stmt = stmt.where(PointFeature.name.ilike(f"%{name_keyword}%"))
+    if bbox:
+        stmt = stmt.where(func.ST_Intersects(
+            PointFeature.geom,
+            func.ST_MakeEnvelope(bbox[0], bbox[1], bbox[2], bbox[3], 4326)
+        ))
+
+    result = await db.execute(stmt)
+    return result.all()
+
+
+async def kde_analysis(
+    rows,
+    grid_size: int,
+    bandwidth: float | None = None,
+    bounds: tuple | None = None,
+):
+    """
+    核密度分析：高斯核 KDE，返回热力格网 GeoJSON。
+    密度(c) = Σ exp(-d²/2σ²)，分块累加避免大数组爆内存，最终归一化到 0~1。
+
+    :param rows: fetch_poi_coords 的查询结果
+    :param grid_size: 格网行列数（生成 N×N 个单元）
+    :param bandwidth: 核带宽（米），None 则自动取范围最大跨度的 1/30
+    :param bounds: (min_lon, min_lat, max_lon, max_lat)，None 则取数据外接矩形
+    :return: (grid FeatureCollection, bounds, bandwidth)
+    """
+    pts = np.array([[r.lon, r.lat] for r in rows], dtype=float)
+
+    if bounds is None:
+        bounds = (pts[:, 0].min(), pts[:, 1].min(), pts[:, 0].max(), pts[:, 1].max())
+    min_lon, min_lat, max_lon, max_lat = bounds
+
+    mean_lat = (min_lat + max_lat) / 2
+    kx = 111320 * np.cos(np.radians(mean_lat))   # 经度差→米
+    ky = 110540                                  # 纬度差→米
+
+    if bandwidth is None:
+        span = max((max_lon - min_lon) * kx, (max_lat - min_lat) * ky)
+        bandwidth = span / 30 if span > 0 else 100
+
+    # 点位与格网中心统一转米制坐标
+    pm = np.column_stack([pts[:, 0] * kx, pts[:, 1] * ky])
+    xs = np.linspace(min_lon, max_lon, grid_size + 1)
+    ys = np.linspace(min_lat, max_lat, grid_size + 1)
+    cx, cy = (xs[:-1] + xs[1:]) / 2, (ys[:-1] + ys[1:]) / 2
+    gx, gy = np.meshgrid(cx, cy)
+    gcm = np.column_stack([gx.ravel(), gy.ravel()]) * np.array([kx, ky])
+
+    inv2s2 = -0.5 / (bandwidth ** 2)
+    dens = np.empty(len(gcm), dtype=float)
+    chunk = 512
+    for i in range(0, len(gcm), chunk):
+        ch = gcm[i:i + chunk]
+        d2 = ((ch[:, None, :] - pm[None, :, :]) ** 2).sum(axis=-1)
+        dens[i:i + len(ch)] = np.exp(d2 * inv2s2).sum(axis=1)
+
+    dens = dens.reshape(grid_size, grid_size)
+    dens /= dens.max()
+
+    # 归一化密度 → GeoJSON 格网单元（密度≈0 的单元跳过，压缩体积）
+    cell_w, cell_h = (max_lon - min_lon) / grid_size, (max_lat - min_lat) / grid_size
+    features = []
+    for iy in range(grid_size):
+        for ix in range(grid_size):
+            d = dens[iy, ix]
+            if d <= 1e-4:
+                continue
+            x0 = min_lon + ix * cell_w
+            y0 = min_lat + iy * cell_h
+            x1, y1 = x0 + cell_w, y0 + cell_h
+            features.append({
+                "type": "Feature",
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [[[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]]],
+                },
+                "properties": {"density": round(float(d), 4)},
+            })
+
+    grid = {"type": "FeatureCollection", "features": features}
+    return grid, bounds, bandwidth
+
+
+async def kmeans_analysis(
+    db: AsyncSession,
+    userid: int,
+    k: int,
+    name_keyword: str | None = None,
+    bbox: tuple | None = None,
+):
+    """
+    POI 空间聚类：优先用 PostGIS ST_ClusterKMeans（3857 米制投影下聚类，聚类编号从 0 开始），
+    PostGIS 版本不支持窗口函数时自动降级为 numpy 实现的 K-Means（k-means++ 初始化）。
+
+    :return: {method, k, point_count, cluster_count, clusters, centroids, members}
+    """
+    conditions = [PointFeature.userid == userid]
+    if name_keyword:
+        conditions.append(PointFeature.name.ilike(f"%{name_keyword}%"))
+    if bbox:
+        conditions.append(func.ST_Intersects(
+            PointFeature.geom,
+            func.ST_MakeEnvelope(bbox[0], bbox[1], bbox[2], bbox[3], 4326)
+        ))
+
+    coords_cols = (
+        PointFeature.id, PointFeature.name,
+        func.ST_X(PointFeature.geom).label("lon"),
+        func.ST_Y(PointFeature.geom).label("lat"),
+    )
+
+    try:
+        # ST_ClusterKMeans 窗口函数（PostGIS 3.0+）
+        stmt = select(
+            func.ST_ClusterKMeans(func.ST_Transform(PointFeature.geom, 3857), k)
+            .over().label("cid"),
+            *coords_cols,
+        ).where(*conditions)
+        rows = (await db.execute(stmt)).all()
+        return _build_cluster_result(rows, [r.cid for r in rows], k, "ST_ClusterKMeans")
+    except DBAPIError:
+        # 降级：取坐标后用 numpy K-Means 聚类
+        rows = (await db.execute(select(*coords_cols).where(*conditions))).all()
+        pts = np.array([[r.lon, r.lat] for r in rows], dtype=float)
+        labels = _kmeans_numpy(pts, k)
+        return _build_cluster_result(rows, labels, k, "python-kmeans")
+
+
+def _kmeans_numpy(points, k, max_iter=100):
+    """numpy 版 K-Means（k-means++ 初始化），points: (M,2) 经纬度 → 返回各点簇号"""
+    mean_lat = points[:, 1].mean()
+    kx = 111320 * np.cos(np.radians(mean_lat))
+    pm = np.column_stack([points[:, 0] * kx, points[:, 1] * 110540])  # 米制投影
+
+    rng = np.random.default_rng(42)
+    centers = [pm[int(rng.integers(len(pm)))]]
+    while len(centers) < k:
+        d2 = ((pm[:, None, :] - np.array(centers)[None, :, :]) ** 2).sum(axis=-1).min(axis=1)
+        if d2.sum() == 0:   # 点位重合或不同坐标数不足 k，提前收尾
+            break
+        centers.append(pm[int(rng.choice(len(pm), p=d2 / d2.sum()))])
+    centers = np.array(centers)
+
+    for _ in range(max_iter):
+        labels = ((pm[:, None, :] - centers[None, :, :]) ** 2).sum(axis=-1).argmin(axis=1)
+        new_centers = np.array([
+            pm[labels == j].mean(axis=0) if (labels == j).any() else centers[j]
+            for j in range(len(centers))
+        ])
+        if np.allclose(centers, new_centers, atol=1e-6):
+            break
+        centers = new_centers
+
+    labels = ((pm[:, None, :] - centers[None, :, :]) ** 2).sum(axis=-1).argmin(axis=1)
+    return labels
+
+
+def _build_cluster_result(rows, ids, k, method):
+    """聚类结果 → GeoJSON（簇质心 + 簇成员），rows 字段 id/name/lon/lat"""
+    groups = {}
+    for r, cid in zip(rows, ids):
+        groups.setdefault(int(cid), []).append(r)
+
+    clusters, centroids, members = [], [], []
+    for cid in sorted(groups):
+        group = groups[cid]
+        lon = sum(r.lon for r in group) / len(group)
+        lat = sum(r.lat for r in group) / len(group)
+        clusters.append({
+            "cluster_id": cid,
+            "count": len(group),
+            "center": [round(lon, 6), round(lat, 6)],
+        })
+        centroids.append({
+            "type": "Feature",
+            "geometry": {"type": "Point", "coordinates": [round(lon, 6), round(lat, 6)]},
+            "properties": {"cluster_id": cid, "count": len(group)},
+        })
+        for r in group:
+            members.append({
+                "type": "Feature",
+                "geometry": {"type": "Point", "coordinates": [float(r.lon), float(r.lat)]},
+                "properties": {"id": r.id, "name": r.name, "cluster_id": cid},
+            })
+
+    return {
+        "method": method,
+        "k": k,
+        "point_count": len(rows),
+        "cluster_count": len(groups),
+        "clusters": clusters,
+        "centroids": {"type": "FeatureCollection", "features": centroids},
+        "members": {"type": "FeatureCollection", "features": members},
+    }
 
